@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111a24">
+<title>謎解きダンジョン ～失われた秘宝～</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./assets/icon-192.png">
+<link rel="icon" href="./assets/icon-192.png" type="image/png">
+<link rel="stylesheet" href="./css/style.css">
+<script type="module" src="./js/main.js"></script>
+</head>
+<body>
+<header class="top"><div class="wrap nav">
+<a class="brand" href="./"><span class="crest">◆</span><span>謎解きダンジョン<small>失われた秘宝</small></span></a>
+<nav aria-label="メニュー"><button data-panel="stages">ステージ</button><button data-panel="history">学習履歴</button><button data-panel="settings" aria-label="設定">⚙ <span>設定</span></button></nav>
+</div></header>
+<main class="wrap">
+<div class="heading"><div><p id="chapter" class="eyebrow">冒険の書</p><h1 id="heading">謎解きダンジョン</h1></div><button id="restart" hidden>もう一度挑戦</button></div>
+<div class="layout">
+<section class="game" aria-label="ゲーム画面">
+<div class="gamebar"><span id="location">◆　失われた秘宝</span><span id="stats"></span><button id="field-notes" aria-label="ミッションと文章" hidden>▤</button><button id="field-menu" aria-label="メニュー" hidden>☰</button><button id="pause" aria-label="一時停止" hidden>Ⅱ</button></div>
+<div class="viewport">
+<canvas id="world" width="480" height="288" aria-label="冒険マップ"></canvas>
+<div id="title" class="title">
+<div class="title-inner"><div class="title-mark">◇</div><h2>謎解きダンジョン</h2><p>～ 失われた秘宝 ～</p>
+<button id="start" class="primary" disabled>▶　冒険をはじめる</button><p id="load-error" role="alert"></p></div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+</div>
+<div id="touch-pad" hidden>
+<div id="joystick" aria-label="移動ジョイスティック"><span></span></div>
+<div class="touch-actions">
+<button data-action="interact">調べる</button><button data-action="attack">攻撃</button>
+<button data-action="cycle">切替</button><button data-action="cast">魔法・道具</button>
+</div>
+</div>
+<div id="controls" class="controls"><span><kbd>WASD</kbd> 移動</span><span><kbd>Space</kbd> 剣</span><span><kbd>E</kbd> 調べる</span><span><kbd>Q</kbd> 魔法・道具</span><span><kbd>R</kbd> 記録</span><span><kbd>Esc</kbd> 休憩</span></div>
+</section>
+<aside>
+<section class="card"><div class="card-heading"><span>◆</span><h2>ミッション</h2></div><p id="mission">文章を手がかりに、失われた秘宝を探し出そう。</p><button id="journal" disabled>▤　冒険の記録 <kbd>R</kbd></button></section>
+<section class="card"><div class="card-heading"><span>✦</span><h2>魔法・道具</h2></div>
+<div id="slots"><button data-slot="0"><kbd>1</kbd> <span class="fire">◆</span> 炎</button><button data-slot="1"><kbd>2</kbd> <span class="ice">◆</span> 氷</button><button data-slot="2"><kbd>3</kbd> <span class="heal">✚</span> 回復薬</button></div>
+<button id="bag">所持品・装備</button></section>
+</aside>
+</div>
+<footer><span>謎解きダンジョン</span><span>Ver. 0.1</span></footer>
+</main>
+<dialog id="modal" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close" aria-label="閉じる">×</button></div><div id="dialog-body"></div></dialog>
+</body>
+</html>
