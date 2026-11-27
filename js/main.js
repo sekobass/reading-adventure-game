@@ -114,6 +114,7 @@ function updateHUD() {
 function syncScreen() {
   $('#title').hidden = Boolean(game);
   for (const name of ['restart','pause','field-notes','field-menu']) $('#'+name).hidden = !game;
+  $('#clear-result').hidden = !game?.finished;
   $('#journal').disabled = !game;
   $('#chapter').textContent = game ? `STAGE ${String(game.stage.id).padStart(2,'0')}` : '冒険の書';
   $('#heading').textContent = game?.stage.name ?? '謎解きダンジョン';
@@ -228,14 +229,21 @@ function complete() {
   const id = game.stage.id;
   save.cleared = [...new Set([...save.cleared,id])];
   save.unlocked = Math.min(stages.length,Math.max(save.unlocked,id+1));
+  $('#clear-result').hidden = false;
+  showClearResult();
   writeSave();
   writeHistory();
   sound('win');
+}
+function showClearResult() {
+  if (!game?.finished) return;
+  const id = game.stage.id;
   open('complete',id===stages.length?'冒険クリア　失われた秘宝':'ステージクリア');
   passage(game.question.explanation);
   paragraph(record.firstSuccess?'初回成功　・　回復薬を1つ獲得':`読解の誤答 ${record.mistakes.length}回　・　回復薬を1つ獲得`);
   buttons(id<stages.length?['次のステージ',()=>start(id+1),true]:['ステージ選択',stageMenu,true],
     ['もう一度挑戦',()=>start(id,true)]);
+  $('#dialog-title').focus();
 }
 function pause() {
   if (!game) return;
@@ -382,7 +390,10 @@ function perform(action) {
   if (!playable()) return;
   if (action==='journal') return journal();
   if (action==='pause') return pause();
-  if (game.finished) return;
+  if (game.finished) {
+    if (action==='interact') showClearResult();
+    return;
+  }
   if (action==='cycle') game.slot = (game.slot+1)%3;
   else if (action.startsWith('slot')) game.slot = +action.at(-1);
   else if (action==='attack') game.attack();
@@ -393,6 +404,7 @@ const controls = input({playable,action:perform});
 for (const [selector,callback] of [
   ['#journal',journal],['#field-notes',journal],['#pause',pause],['#field-menu',pause],
   ['#bag',bag],['#restart',()=>start(game.stage.id,true)],
+  ['#clear-result',showClearResult],
   ['#start',()=>save.unlocked>1?stageMenu():start(1)],
   ['[data-panel="stages"]',stageMenu],['[data-panel="history"]',historyPanel],
   ['[data-panel="settings"]',settings],
@@ -404,7 +416,7 @@ let prev = 0;
 function frame(time) {
   const step = Math.min(.04,(time-prev)/1000);
   prev = time;
-  if (playable()) {
+  if (playable() && !game.finished) {
     game.tick(step,...controls.movement());
     if (controls.attacking() && playable()) game.attack();
   }

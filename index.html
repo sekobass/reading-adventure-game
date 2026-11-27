@@ -17,7 +17,7 @@
 <nav aria-label="メニュー"><button data-panel="stages">ステージ</button><button data-panel="history">学習履歴</button><button data-panel="settings" aria-label="設定">⚙ <span>設定</span></button></nav>
 </div></header>
 <main class="wrap">
-<div class="heading"><div><p id="chapter" class="eyebrow">冒険の書</p><h1 id="heading">謎解きダンジョン</h1></div><button id="restart" hidden>もう一度挑戦</button></div>
+<div class="heading"><div><p id="chapter" class="eyebrow">冒険の書</p><h1 id="heading">謎解きダンジョン</h1></div><div class="heading-actions"><button id="clear-result" class="primary" hidden>クリア結果</button><button id="restart" hidden>もう一度挑戦</button></div></div>
 <div class="layout">
 <section class="game" aria-label="ゲーム画面">
 <div class="gamebar"><span id="location">◆　失われた秘宝</span><span id="stats"></span><button id="field-notes" aria-label="ミッションと文章" hidden>▤</button><button id="field-menu" aria-label="メニュー" hidden>☰</button><button id="pause" aria-label="一時停止" hidden>Ⅱ</button></div>
@@ -45,8 +45,8 @@
 <button id="bag">所持品・装備</button></section>
 </aside>
 </div>
-<footer><span>謎解きダンジョン</span><span>Ver. 0.1</span></footer>
+<footer><span>謎解きダンジョン</span><span>Ver. 0.1.1</span></footer>
 </main>
-<dialog id="modal" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close" aria-label="閉じる">×</button></div><div id="dialog-body"></div></dialog>
+<dialog id="modal" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title" tabindex="-1"></h2><button id="close" aria-label="閉じる">×</button></div><div id="dialog-body"></div></dialog>
 </body>
 </html>
