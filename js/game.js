@@ -187,6 +187,7 @@ export class Game {
     this.effect(e.x, e.y, 'burst', '#ffe499');
     this.reward(e.boss ? 55 : 17, e.boss ? 26 : 7);
     if (e.win) this.win();
+    else this.ui.persist();
   }
 
   reward(xp, gold) {
@@ -205,7 +206,6 @@ export class Game {
       this.ui.toast('レベルアップ！');
       this.ui.sound('pickup');
     }
-    this.ui.persist();
   }
 
   nearest() {
