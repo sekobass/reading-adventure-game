@@ -156,12 +156,32 @@ function wrong(message) {
   }
   writeHistory();
 }
+const readingGlossary = {
+  古代遺跡:'こだいいせき', 遺跡:'いせき', 洞窟:'どうくつ', 魔物:'まもの',
+  冒険者:'ぼうけんしゃ', 台座:'だいざ', 扉:'とびら', 燃料:'ねんりょう',
+  倉庫:'そうこ', 手当て:'てあて', 薬草:'やくそう', 番人:'ばんにん',
+};
+const readingTerm = new RegExp('('+Object.keys(readingGlossary).join('|')+')','g');
+
+function passage(text) {
+  const line = el('p',undefined,'reading');
+  for (const segment of text.split(readingTerm)) {
+    if (!Object.hasOwn(readingGlossary,segment)) line.append(segment);
+    else {
+      const ruby = el('ruby',segment);
+      ruby.append(el('rt',readingGlossary[segment]));
+      line.append(ruby);
+    }
+  }
+  body.append(line);
+}
+
 function read(note, reread = false, fromJournal = false) {
   open('reading',note.name);
   if (reread) record.rereads += 1;
   writeHistory();
   reading = {record,since:performance.now()};
-  paragraph(note.text,'reading');
+  passage(note.text);
   if (note.delivery && !game.finished && !fromJournal) {
     if (game.flags.has(note.id)) paragraph('この依頼は達成済みです。','muted');
     else buttons(['品物を届ける',()=>{
@@ -212,7 +232,7 @@ function complete() {
   writeHistory();
   sound('win');
   open('complete',id===stages.length?'冒険クリア　失われた秘宝':'ステージクリア');
-  paragraph(game.question.explanation,'reading');
+  passage(game.question.explanation);
   paragraph(record.firstSuccess?'初回成功　・　回復薬を1つ獲得':`読解の誤答 ${record.mistakes.length}回　・　回復薬を1つ獲得`);
   buttons(id<stages.length?['次のステージ',()=>start(id+1),true]:['ステージ選択',stageMenu,true],
     ['もう一度挑戦',()=>start(id,true)]);
