@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "失われた王国 ～七つの封印～",
+  "short_name": "失われた王国",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101720",
+  "theme_color": "#111a24",
+  "icons": [
+    {"src":"./assets/icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"./assets/icon-512.png","sizes":"512x512","type":"image/png"}
+  ]
+}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111a24">
+<title>失われた王国 ～七つの封印～</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./assets/icon-192.png">
+<link rel="icon" href="./assets/icon-192.png" type="image/png">
+<link rel="stylesheet" href="./css/style.css">
+<script type="module" src="./js/main.js"></script>
+</head>
+<body>
+<header class="top"><div class="wrap nav">
+<a class="brand" href="./"><span class="crest">◆</span><span>失われた王国<small>七つの封印</small></span></a>
+<nav aria-label="メニュー"><button data-panel="stages">章を選ぶ</button><button data-panel="history">学習履歴</button><button data-panel="editor">問題管理</button><button data-panel="settings" aria-label="設定">⚙ <span>設定</span></button></nav>
+</div></header>
+<main class="wrap">
+<div class="heading"><div><p id="chapter" class="eyebrow">冒険の書</p><h1 id="heading">失われた王国</h1></div><div class="heading-actions"><button id="end-preview" hidden>テストプレイ終了</button><button id="clear-result" class="primary" hidden>クリア結果</button><button id="restart" hidden>もう一度挑戦</button></div></div>
+<div class="layout">
+<section class="game" aria-label="ゲーム画面">
+<div class="gamebar"><span id="location">◆　七つの封印</span><span id="stats"></span><button id="field-notes" aria-label="ミッションと文章" hidden>▤</button><button id="field-menu" aria-label="メニュー" hidden>☰</button><button id="pause" aria-label="一時停止" hidden>Ⅱ</button></div>
+<div class="viewport">
+<canvas id="world" width="480" height="288" aria-label="冒険マップ"></canvas>
+<div id="title" class="title">
+<div class="title-inner"><div class="title-mark">◇</div><h2>失われた王国</h2><p>～ 七つの封印 ～</p><p class="title-hook">王国が消えた夜、誰が封印を運び出したのか。</p>
+<button id="start" class="primary" disabled>▶　冒険をはじめる</button> <button id="prologue">序章を読む</button><p id="load-error" role="alert"></p></div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+</div>
+<div id="touch-pad" hidden>
+<div id="joystick" aria-label="移動ジョイスティック"><span></span></div>
+<div class="touch-actions">
+<button data-action="interact">調べる</button><button data-action="attack">攻撃</button>
+<button data-action="guard">防御</button><button data-action="dodge">回避</button>
+<button data-action="strong">強攻撃</button><button data-action="heal">回復魔法</button>
+<button data-action="cycle">切替</button><button data-action="cast">魔法・道具</button>
+</div>
+</div>
+<div id="controls" class="controls"><span><kbd>WASD</kbd> 移動</span><span><kbd>Space</kbd> 剣</span><span><kbd>E</kbd> 調べる</span><span><kbd>Q</kbd> 魔法・道具</span><span><kbd>G</kbd> 強攻撃</span><span><kbd>H</kbd> 回復魔法</span><span><kbd>F</kbd> 防御</span><span><kbd>Shift</kbd> 回避</span><span><kbd>R</kbd> 記録</span><span><kbd>Esc</kbd> 休憩</span></div>
+</section>
+<aside>
+<section class="card"><div class="card-heading"><span>◆</span><h2>ミッション</h2></div><p id="mission">文章を手がかりに、七つの封印を探し出そう。</p><button id="journal" disabled>▤　冒険の記録 <kbd>R</kbd></button></section>
+<section class="card"><div class="card-heading"><span>✦</span><h2>魔法・道具</h2></div>
+<div id="slots"><button data-slot="0"><kbd>1</kbd> <span class="fire">▲</span> 炎</button><button data-slot="1"><kbd>2</kbd> <span class="ice">❄</span> 氷</button><button data-slot="2"><kbd>3</kbd> <span class="heal">✚</span> 回復薬</button><button data-slot="3"><kbd>4</kbd> <span class="thunder">ϟ</span> 雷</button></div>
+<button id="bag">所持品・装備</button><button id="music" aria-pressed="false">BGM オフ</button></section>
+<section class="card"><div class="card-heading"><span>◈</span><h2>周辺地図</h2></div><canvas id="minimap" width="160" height="96" aria-label="壁と現在地を示す地図"></canvas></section>
+</aside>
+</div>
+<footer><a href="../">Ver.0.2へ戻る</a><span>Ver. 1.0 開発版</span></footer>
+</main>
+<dialog id="modal" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title" tabindex="-1"></h2><button id="close" aria-label="閉じる">×</button></div><div id="dialog-body"></div></dialog>
+</body>
+</html>
