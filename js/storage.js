@@ -18,8 +18,10 @@ export function storage(notify) {
     write(key, value) {
       try {
         localStorage.setItem(prefix + key, JSON.stringify(value));
+        return true;
       } catch {
         notify();
+        return false;
       }
     },
   };

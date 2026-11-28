@@ -1,3 +1,5 @@
+import { segmentHits, spells, waypoint } from './combat.js';
+
 export const WIDTH = 480;
 export const HEIGHT = 288;
 
@@ -21,9 +23,11 @@ export class Game {
     this.enemies = question.enemies.map(e => this.makeEnemy(e));
     this.inventory = {};
     this.flags = new Set();
+    this.planAttempts = 0;
+    this.projectiles = [];
     this.notes = new Set();
     this.sequence = 0;
-    this.slot = stage.id === 3 ? 1 : 0;
+    this.slot = 0;
     this.effects = [];
     this.clock = 0;
     this.finished = false;
@@ -36,7 +40,7 @@ export class Game {
     const [x, y] = this.stage.start;
     this.player = {
       x, y, hp: maxHP(this.save), mp: maxMP(this.save), attack: 0, cast: 0,
-      invincible: 1, direction: [0, -1], walking: false,
+      guard:0, dodge:0, guardWait:0, dodgeWait:0, invincible: 1, direction: [0, -1], walking: false,
     };
     this.knockedOut = false;
   }
@@ -44,80 +48,187 @@ export class Game {
   makeEnemy(data) {
     const max = Math.ceil((data.boss ? 58 : 23) * this.combat.health);
     return { ...data, hp: max, max, homeX: data.x, homeY: data.y,
-      stunned: 0, windup: 0, rest: 0, flash: 0 };
+      status:null, statusTime:0, burnTick:0, windup:0, rest:0, flash:0, opening:0, exposed:0, phase:0, attacks:0, pathTime:0 };
   }
 
   effect(x, y, kind, color, direction = [0, -1]) {
     this.effects.push({ x, y, kind, color, direction, age: 0 });
   }
 
+  get arenaActive() { return this.flags.has('entered') && !this.finished; }
+
+  get barriers() {
+    const walls = [...this.stage.walls, ...(this.stage.water ?? [])];
+    const arena = this.stage.arena;
+    if (arena) {
+      const { x, y } = arena;
+      if (this.flags.has('entered') && this.finished) {
+        walls.push([x,17,9,y-38],[x,y+21,9,HEIGHT-y-38]);
+      } else walls.push([x,17,9,HEIGHT-34]);
+    }
+    return walls;
+  }
+
   blocked(x, y, radius) {
     if (x < 17 + radius || x > WIDTH - 17 - radius || y < 17 + radius || y > HEIGHT - 17 - radius) return true;
-    const hit = ([left, top, width, height]) =>
-      x + radius > left && y + radius > top && x - radius < left + width && y - radius < top + height;
-    if (this.stage.walls.some(hit) || this.stage.water?.some(hit)) return true;
-    if (this.stage.id === 5 && x + radius > 330 && !this.flags.has('entered')) return true;
-    return false;
+    return this.barriers.some(rect => segmentHits({x,y},{x,y},rect,radius));
+  }
+
+  clear(a,b,padding=0) {
+    return !this.barriers.some(rect=>segmentHits(a,b,rect,padding));
   }
 
   move(entity, dx, dy, radius) {
-    if (!this.blocked(entity.x + dx, entity.y, radius)) entity.x += dx;
-    if (!this.blocked(entity.x, entity.y + dy, radius)) entity.y += dy;
+    for (const [x,y] of [[dx,0],[0,dy]]) {
+      const next = {x:entity.x+x,y:entity.y+y};
+      if (!this.blocked(next.x,next.y,radius) && this.clear(entity,next,radius)) Object.assign(entity,next);
+    }
+  }
+
+  retry() {
+    this.resetPlayer();
+    this.projectiles = [];
+    this.effects = [];
+    if (!this.arenaActive) return;
+    this.flags.delete('entered');
+    this.enemies = this.enemies.filter(e=>!e.arena);
+    const gate = this.objects.find(o=>o.kind==='gate');
+    gate.open = false;
+  }
+
+  guard() {
+    const p = this.player;
+    if (p.guardWait || p.dodge) return;
+    p.guard = .8;
+    p.guardWait = 1.15;
+    this.effect(p.x,p.y,'burst','#c0d8e8');
+  }
+
+  dodge() {
+    const p = this.player;
+    if (p.dodgeWait) return;
+    p.dodge = .34;
+    p.dodgeWait = .93;
+    p.guard = 0;
+    p.evade = p.direction.slice();
+    this.effect(p.x,p.y,'burst','#d7e3bd');
   }
 
   tick(dt, dx, dy) {
     if (this.finished || this.knockedOut) return;
     const p = this.player;
     this.clock += dt;
-    p.attack = Math.max(0, p.attack - dt);
-    p.cast = Math.max(0, p.cast - dt);
-    p.invincible = Math.max(0, p.invincible - dt);
-    p.mp = Math.min(maxMP(this.save), p.mp + dt * 3);
+    for (const timer of ['attack','cast','invincible','guard','dodge','guardWait','dodgeWait']) {
+      p[timer] = Math.max(0,p[timer]-dt);
+    }
+    p.mp = Math.min(maxMP(this.save), p.mp + dt * 3.3);
     const length = Math.hypot(dx, dy);
-    p.walking = length > .1;
-    if (p.walking) {
+    p.walking = length > .1 || p.dodge > 0;
+    if (p.dodge) {
+      this.move(p,p.evade[0]*158*dt,p.evade[1]*158*dt,6);
+    } else if (length > .1) {
       p.direction = [dx / length, dy / length];
-      this.move(p, dx / Math.max(1, length) * 87 * dt, dy / Math.max(1, length) * 87 * dt, 6);
+      const speed = p.guard ? 43 : 87;
+      this.move(p, dx / Math.max(1, length) * speed * dt, dy / Math.max(1, length) * speed * dt, 6);
     }
     for (const e of this.enemies) {
-      if (this.knockedOut) break;
-      if (e.hp <= 0 || e.fixed) continue;
-      e.flash = Math.max(0, e.flash - dt);
-      if (e.stunned > 0) {
-        e.stunned = Math.max(0, e.stunned - dt);
-        continue;
-      }
-      const range = distance(e, p);
-      const reach = e.boss ? 31 : 18;
-      e.rest = Math.max(0, e.rest - dt);
-      if (e.windup > 0) {
-        e.windup -= dt;
-        if (e.windup <= 0) {
-          e.rest = .85;
-          if (range < reach + 3 && !p.invincible) this.hurt(e);
-        }
-        continue;
-      }
-      if (!e.rest && range < reach) {
-        e.windup = e.boss ? .5 : .38;
-      } else if (range > reach - 3 && range < (e.boss ? 151 : 100)) {
-        const pace = (e.boss ? 29 : 39) * this.combat.pace * (e.rest ? .55 : 1);
-        this.move(e, (p.x - e.x) / range * pace * dt, (p.y - e.y) / range * pace * dt, e.boss ? 11 : 5);
-      } else if (!e.boss && range >= 100) {
-        const x = e.homeX + Math.cos(this.clock * .8 + e.homeX) * 15;
-        const y = e.homeY + Math.sin(this.clock * .9 + e.homeY) * 12;
-        this.move(e, (x - e.x) * dt, (y - e.y) * dt, 5);
-      }
+      if (this.finished || this.knockedOut) break;
+      if (e.hp > 0 && !e.fixed) this.tickEnemy(e,dt);
     }
+    if (!this.finished && !this.knockedOut) this.tickProjectiles(dt);
     for (const effect of this.effects) effect.age += dt;
     this.effects = this.effects.filter(effect => effect.age < .55);
   }
 
-  hurt(e) {
+  phase(e) { return e.phases?.[e.phase]; }
+
+  tickEnemy(e,dt) {
     const p = this.player;
-    p.hp = Math.max(0, p.hp - Math.max(1, this.combat.harm + (e.boss ? 4 : 0) - this.save.armor * 2));
-    p.invincible = .8;
-    this.effect(p.x, p.y, 'burst', '#ff7861');
+    for (const timer of ['flash','rest','opening','exposed','statusTime','pathTime']) {
+      e[timer] = Math.max(0,e[timer]-dt);
+    }
+    if (!e.statusTime) e.status = null;
+    if (e.status === 'burn' && !e.boss) {
+      e.burnTick -= dt;
+      if (e.burnTick <= 0) {
+        e.burnTick = .65;
+        this.damage(e,3);
+        if (!e.hp) return;
+      }
+    }
+    if (e.status === 'freeze' || e.status === 'shock') return;
+    const range = distance(e,p);
+    const phase = this.phase(e);
+    const sees = this.clear(e,p,1);
+    const reach = e.boss ? 36 : 21;
+    if (e.windup > 0) {
+      e.windup -= dt;
+      if (e.windup <= 0) this.resolveAttack(e);
+      return;
+    }
+    if (!e.rest && sees && range < (e.boss ? 145 : e.role==='support' ? 104 : reach)) {
+      e.pattern = phase?.pattern ?? (e.role==='support' ? 'shot' : 'melee');
+      if (e.boss && !phase?.guard && e.attacks%2===1) e.pattern='sweep';
+      e.attacks += 1;
+      e.aim = {x:p.x,y:p.y};
+      const telegraph = this.combat.pace > 1 ? .68 : .86;
+      e.windup = e.boss ? telegraph : .55;
+      return;
+    }
+    if (range < 174 && range > reach-2 && !(e.boss && e.rest)) {
+      const radius = e.boss ? 10 : 5;
+      const clear = (a,b)=>this.clear(a,b,radius);
+      if (clear(e,p)) e.next = p;
+      else if (!e.pathTime || e.next === p) {
+        e.pathTime = .3;
+        e.next = waypoint(e,p,clear,o=>this.blocked(o.x,o.y,radius),WIDTH,HEIGHT);
+      }
+      if (e.next) {
+        const gap = distance(e,e.next);
+        if (gap > 1) {
+          const step = Math.min(gap,(e.boss?36:42)*this.combat.pace*dt);
+          this.move(e,(e.next.x-e.x)*step/gap,(e.next.y-e.y)*step/gap,radius);
+        } else e.pathTime = 0;
+      }
+    }
+  }
+
+  resolveAttack(e) {
+    const p=this.player;
+    const phase=this.phase(e);
+    e.rest = e.boss ? 1.5 : 1;
+    const range = distance(e,p);
+    if (e.pattern==='shot') {
+      this.launch(e,e.aim,112,170,{source:e});
+      return;
+    }
+    if (e.pattern==='rush') {
+      const gap=distance(e,e.aim) || 1;
+      for (let i=0;i<6;i++) this.move(e,(e.aim.x-e.x)/gap*6,(e.aim.y-e.y)/gap*6,10);
+    }
+    const area=e.pattern==='pulse' || e.pattern==='cross';
+    const reach=area ? (e.pattern==='pulse'?132:115) : e.pattern==='sweep'?53:e.boss?39:24;
+    if (area) this.effect(e.x,e.y,'wave','#f8ab73');
+    const dodged=p.dodge || (area && range<=155 && distance(e.aim,p)>26);
+    const hit=distance(e,p)<=reach && this.clear(e,p,2);
+    if (phase?.guard && this.clear(e,p) && range<155 && (dodged || (hit && p.guard))) {
+      e.opening=3.8;
+    }
+    if (hit && !dodged) this.hurt(e,area?3:0);
+    if (e.pattern==='cross') {
+      for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        this.launch(e,{x:e.x+dx,y:e.y+dy},95,110,{source:e});
+      }
+    }
+  }
+
+  hurt(e, extra = 0) {
+    const p = this.player;
+    if (p.invincible || p.dodge) return;
+    const amount=Math.max(1,this.combat.harm+(e.boss?5:0)+extra-this.save.armor*2);
+    p.hp = Math.max(0,p.hp-(p.guard?Math.max(1,Math.floor(amount*.25)):amount));
+    p.invincible = .7;
+    this.effect(p.x, p.y, 'burst', p.guard?'#c0d8e8':'#ff7861');
     this.ui.sound('hurt');
     if (p.hp === 0) {
       this.knockedOut = true;
@@ -125,29 +236,75 @@ export class Game {
     }
   }
 
+  launch(from,to,speed,range,payload) {
+    const dx=to.x-from.x, dy=to.y-from.y, length=Math.hypot(dx,dy) || 1;
+    this.projectiles.push({x:from.x,y:from.y,dx:dx/length,dy:dy/length,speed,range,...payload});
+  }
+
+  tickProjectiles(dt) {
+    this.projectiles = this.projectiles.filter(shot=>{
+      if (this.finished || this.knockedOut) return false;
+      const step=Math.min(shot.range,shot.speed*dt);
+      const target={x:shot.x+shot.dx*step,y:shot.y+shot.dy*step};
+      if (this.blocked(target.x,target.y,2) || !this.clear(shot,target,2)) {
+        this.effect(shot.x,shot.y,'burst',shot.spell?.color ?? '#f3ad73');
+        return false;
+      }
+      const actors=shot.spell?this.enemies:[this.player];
+      const hit=actors.filter(e=>e.hp>0&&!e.fixed&&(!e.arena||this.arenaActive)&&this.clear(shot,e,1))
+        .map(e=>{
+          const along=(e.x-shot.x)*shot.dx+(e.y-shot.y)*shot.dy;
+          const offset=distance(e,{x:shot.x+shot.dx*clamp(along,0,step),y:shot.y+shot.dy*clamp(along,0,step)});
+          return {e,offset,along};
+        })
+        .filter(({e,offset})=>offset<=(e.boss?13:9))
+        .sort((a,b)=>a.along-b.along)[0]?.e;
+      if (hit) {
+        if (shot.spell) this.hitSpell(hit,shot.spell);
+        else this.hurt(shot.source);
+        return false;
+      }
+      shot.range-=step;
+      Object.assign(shot,target);
+      return shot.range>0;
+    });
+  }
+
   attack() {
     const p = this.player;
-    if (p.attack || this.finished || this.knockedOut) return;
+    if (p.attack || p.dodge || p.guard || this.finished || this.knockedOut) return;
     p.attack = .32;
     this.ui.sound('slash');
     this.effect(p.x, p.y, 'slash', '#fff0af', p.direction);
     const candidates = this.enemies.filter(e => {
       const range = distance(e, p);
-      return !e.fixed && e.hp > 0 && range < (e.boss ? 36 : 27) &&
+      return !e.fixed && e.hp > 0 && range < (e.boss ? 36 : 27) && this.clear(p,e,2) &&
+        (!e.arena || this.arenaActive) &&
         (range < 13 || (e.x - p.x) * p.direction[0] + (e.y - p.y) * p.direction[1] > -3);
     });
     for (const e of candidates) {
       if (this.finished) break;
-      if (e.weakness && e.stunned <= 0) {
-        this.ui.wrong('守りが固いときに剣を当てた');
-        this.effect(e.x, e.y, 'burst', '#95aab7');
-      } else this.damage(e, 11 + this.save.weapon * 3 + this.save.level);
+      if (e.boss && (!e.exposed || this.supports(e))) {
+        this.rejectAttack(e,'守りが固いときに剣を当てた');
+        continue;
+      }
+      if (e.role==='guard' && !e.status && !e.rest) {
+        this.effect(e.x,e.y,'burst','#b6bcd1');
+        continue;
+      }
+      if (e.role==='support' && !e.status && e.windup>0 && !e.evaded) {
+        e.evaded=true;
+        this.move(e,-p.direction[1]*16,p.direction[0]*16,5);
+        continue;
+      }
+      if (e.boss) e.exposed=0;
+      this.damage(e,11+this.save.weapon*3+this.save.level);
     }
   }
 
   cast() {
     const p = this.player;
-    if (p.cast || this.finished || this.knockedOut) return;
+    if (p.cast || p.dodge || p.guard || this.finished || this.knockedOut) return;
     if (this.slot === 2) {
       if (!this.save.inventory.回復薬) return this.ui.toast('回復薬を持っていない。');
       if (p.hp >= maxHP(this.save)) return this.ui.toast('HPは満タンだ。');
@@ -159,28 +316,64 @@ export class Game {
       this.ui.sound('pickup');
       return;
     }
-    if (p.mp < 8) return this.ui.toast('MPが足りない。少し待つと回復する。');
-    p.mp -= 8;
-    p.cast = .48;
-    const kind = this.slot === 0 ? 'fire' : 'ice';
-    const color = kind === 'fire' ? '#ff9c62' : '#93eaff';
-    this.effect(p.x, p.y, 'spell', color);
+    const spell=spells[this.slot];
+    if (!spell) return;
+    if (p.mp < spell.cost) return this.ui.toast('MPが足りない。少し待つと回復する。');
+    p.mp-=spell.cost;
+    p.cast=spell.cooldown;
+    this.effect(p.x,p.y,'spell',spell.color);
     this.ui.sound('magic');
-    for (const e of this.enemies) {
-      if (e.fixed || e.hp <= 0 || distance(e, p) > 76) continue;
-      this.effect(e.x, e.y, 'burst', color);
-      if (e.weakness === kind) {
-        e.stunned = e.stun;
-        e.windup = 0;
-        this.ui.toast('番人の動きが止まった！');
-      } else if (e.weakness) {
-        e.hp = Math.min(e.max, e.hp + 15);
-        this.ui.wrong('番人を回復させる魔法を当てた');
-      } else this.damage(e, 12 + this.save.level);
+    this.launch(p,{x:p.x+p.direction[0],y:p.y+p.direction[1]},170,108,{spell});
+  }
+
+  supports(e) {
+    return this.enemies.some(other=>other!==e && other.hp>0 && other.arena && other.role==='support');
+  }
+
+  rejectAttack(e,message) {
+    if (e.disruptedAt===undefined || this.clock-e.disruptedAt>.8) {
+      e.disruptedAt=this.clock;
+      this.ui.wrong(message);
     }
+    if (!e.windup && !e.exposed) e.rest=Math.min(e.rest,.15);
+    this.effect(e.x,e.y,'burst','#95aab7');
+  }
+
+  hitSpell(e,spell) {
+    const phase=this.phase(e);
+    if (e.boss && (this.supports(e) || spell.id!==phase.element || (phase.guard && !e.opening))) {
+      this.rejectAttack(e,'守りが固い間に魔法を当てた');
+      return;
+    }
+    if (e.role==='guard' && spell.id==='fire') {
+      this.effect(e.x,e.y,'burst','#95aab7');
+      return;
+    }
+    if (e.boss && e.exposed) return;
+    e.status=spell.effect;
+    e.statusTime=e.boss?2.1:spell.id==='fire'?2.6:spell.id==='ice'?1.65:1.1;
+    e.burnTick=.3;
+    if (spell.effect!=='burn') e.windup=0;
+    this.effect(e.x,e.y,'burst',spell.color);
+    if (e.boss) {
+      e.exposed=2.1;
+      e.opening=0;
+    } else this.damage(e,spell.id==='thunder'?12:8);
   }
 
   damage(e, amount) {
+    const nextPhase=e.phases?.[e.phase+1];
+    const threshold=Math.ceil(e.max/2);
+    if (nextPhase && e.hp-amount<=threshold) {
+      e.hp=threshold;
+      e.phase+=1;
+      e.exposed=e.opening=e.statusTime=e.windup=0;
+      e.status=null;
+      e.rest=.35;
+      this.effect(e.x,e.y,'wave','#e8cb96');
+      this.ui.toast('番人が姿勢を変えた。');
+      return;
+    }
     e.hp = Math.max(0, e.hp - amount);
     e.flash = .17;
     if (e.hp) return;
@@ -209,7 +402,7 @@ export class Game {
   }
 
   nearest() {
-    return this.objects.filter(o => !o.open && distance(o, this.player) < 25)
+    return this.objects.filter(o => !o.open && distance(o, this.player) < 25 && this.clear(this.player,o))
       .sort((a, b) => distance(a, this.player) - distance(b, this.player))[0];
   }
 
@@ -234,7 +427,27 @@ export class Game {
     this.operate(o);
   }
 
+  propose(index,reasonIndex) {
+    const plan=this.question.plan;
+    if (!plan || this.flags.has('planned') || this.planAttempts>=2 ||
+        !plan.sources.every(id=>this.notes.has(id))) return;
+    const option=plan.options[index];
+    if (!option) return;
+    const reason=plan.reasons?.[reasonIndex];
+    if (plan.reasons && !reason) return;
+    if (option.correct && (!plan.reasons || reason.correct)) {
+      this.flags.add('planned');
+      this.ui.sound('pickup');
+      return;
+    }
+    this.planAttempts+=1;
+    this.ui.wrong('攻略計画: '+option.text+(reason?' 根拠: '+reason.text:''));
+  }
+
   operate(o) {
+    const plan=this.question.plan;
+    if (plan?.target===o.id) return this.ui.plan?.();
+    if (plan && !this.flags.has('planned')) return this.ui.toast('記録を読み、計画を立ててから進もう。');
     const seq = this.question.sequence;
     if (seq?.targets.includes(o.id)) {
       if (this.flags.has(seq.onComplete)) return this.ui.toast('仕掛けはすでに動いている。');
@@ -270,10 +483,13 @@ export class Game {
       this.effect(o.x, o.y, 'burst', '#ffe9a3');
       this.ui.sound('pickup');
     }
-    if (result.spawn) this.enemies.push(this.makeEnemy(result.spawn));
+    if (result.spawn) this.enemies.push(...[result.spawn].flat().map(enemy=>this.makeEnemy(enemy)));
     if (result.move) {
       [this.player.x, this.player.y] = result.move;
-      if (o.kind === 'gate') this.flags.add('entered');
+      if (o.kind === 'gate') {
+        this.flags.add('entered');
+        this.projectiles=[];
+      }
     }
     if (o.delivery) this.ui.toast('依頼の品を届けた！');
     if (!rule.when.length && rule.wrong) this.ui.wrong(rule.wrong);

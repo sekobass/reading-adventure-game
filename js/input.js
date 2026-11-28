@@ -4,7 +4,8 @@ const directions = {
 };
 const actions = {
   Space:'attack', KeyQ:'cast', KeyE:'interact', KeyR:'journal', Escape:'pause',
-  Digit1:'slot0', Digit2:'slot1', Digit3:'slot2',
+  Digit1:'slot0', Digit2:'slot1', Digit3:'slot2', Digit4:'slot3',
+  KeyF:'guard', ShiftLeft:'dodge', ShiftRight:'dodge',
 };
 
 export function input({ playable, action }) {

@@ -31,7 +31,7 @@ before(async () => {
     }
     try {
       const content = legacyWorker && path === scope+'sw.js'
-        ? `self.addEventListener('install', event => event.waitUntil(caches.open('reading-dungeon-v0.1.0')));
+        ? `self.addEventListener('install', event => event.waitUntil(caches.open('reading-dungeon-'+self.registration.scope+'-v0.1.1')));
            self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));`
         : await readFile(file);
       response.writeHead(200, {
@@ -63,7 +63,7 @@ const history = [{
   rereads: 0, readingMs: 1250, cleared: true, defeats: 0,
 }];
 
-async function seed(context, storageBlocked = false) {
+async function seed(context, storageBlocked = false, inheritedProgress = progress) {
   await context.addInitScript(({ progress, history, storageBlocked }) => {
     if (!localStorage.getItem('reading-dungeon-v1:progress')) {
       localStorage.setItem('reading-dungeon-v1:progress',JSON.stringify(progress));
@@ -72,7 +72,7 @@ async function seed(context, storageBlocked = false) {
     if (storageBlocked) Storage.prototype.setItem = () => {
       throw new DOMException('Simulated write error','QuotaExceededError');
     };
-  }, { progress, history, storageBlocked });
+  }, { progress:inheritedProgress, history, storageBlocked });
 }
 
 // Read the player's sprite from the visible Canvas. All changes of position
@@ -114,7 +114,9 @@ for (const touch of [false,true]) {
         const dx = key==='ArrowRight' ? 1 : key==='ArrowLeft' ? -1 : 0;
         const dy = key==='ArrowDown' ? 1 : key==='ArrowUp' ? -1 : 0;
         if (cdp) {
-          const box = await page.locator('#joystick').boundingBox();
+          const joystick=page.locator('#joystick');
+          await joystick.scrollIntoViewIfNeeded();
+          const box = await joystick.boundingBox();
           await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{
             x: box.x + box.width*(.5+.35*dx), y: box.y + box.height*(.5+.35*dy),
           }]});
@@ -131,6 +133,15 @@ for (const touch of [false,true]) {
       await inspect();
       await page.getByRole('heading',{name:'兵士の依頼'}).waitFor();
       await tap(page.getByRole('button',{name:'閉じる'}));
+      await move('ArrowRight',137);
+      await inspect();
+      await page.getByRole('heading',{name:'荷運びの記録'}).waitFor();
+      await tap(page.getByRole('button',{name:'閉じる'}));
+      await move('ArrowRight',186);
+      await inspect();
+      await page.getByRole('heading',{name:'攻略計画'}).waitFor();
+      assert.equal(await page.locator('.plan-choices button').count(),4);
+      await tap(page.getByRole('button',{name:/西で燃料を受け取ってから/}));
       await move('ArrowLeft',68);
       await move('ArrowUp',83);
       await inspect();
@@ -150,6 +161,14 @@ for (const touch of [false,true]) {
       await tap(page.getByRole('button',{name:'次のステージ'}));
       await page.getByRole('heading',{name:'魔物の弱点'}).waitFor();
       await move('ArrowRight',90);
+      if (touch) {
+        await tap(page.locator('[data-action=guard]'));
+        await tap(page.locator('[data-action=dodge]'));
+      } else {
+        await page.keyboard.press('KeyF');
+        await page.keyboard.press('ShiftLeft');
+      }
+      await page.waitForFunction(atPixel,{axis:'x',goal:110,sense:1});
       assert.deepEqual(errors,[]);
       if (!touch) {
         const saved = await page.evaluate(()=>({
@@ -186,7 +205,7 @@ test('GitHub Pages相当のパスで旧版から更新し、通信切断とク�
     let page = await context.newPage();
     await page.goto(base+'?utm_source=chatgpt.com');
     await page.waitForFunction(()=>navigator.serviceWorker.controller!==null);
-    assert.ok(await page.evaluate(()=>caches.has('reading-dungeon-v0.1.0')));
+    assert.ok(await page.evaluate(()=>caches.has('reading-dungeon-'+location.origin+location.pathname+'-v0.1.1')));
     legacyWorker = false;
     await page.evaluate(async()=> (await navigator.serviceWorker.getRegistration()).update());
     await waitUntil(()=>page.evaluate(async()=>Boolean((await navigator.serviceWorker.getRegistration()).waiting)));
@@ -196,16 +215,16 @@ test('GitHub Pages相当のパスで旧版から更新し、通信切断とク�
     await waitUntil(()=>probe.evaluate(async scope=>{
       const registration = await navigator.serviceWorker.getRegistration(scope);
       return registration?.active?.state === 'activated' && !registration.waiting &&
-        !(await caches.has('reading-dungeon-v0.1.0'));
+        !(await caches.has('reading-dungeon-'+scope+'-v0.1.1'));
     },base));
     await probe.close();
 
     page = await context.newPage();
     await page.goto(base+'?utm_source=chatgpt.com');
     await page.waitForFunction(()=>navigator.serviceWorker.controller!==null);
-    assert.match(await page.locator('footer').innerText(),/Ver\. 0\.1\.1/);
+    assert.match(await page.locator('footer').innerText(),/Ver\. 0\.2\.0/);
     const cached = await page.evaluate(async()=>{
-      const name = (await caches.keys()).find(name=>name.endsWith('-v0.1.1'));
+      const name = (await caches.keys()).find(name=>name.endsWith('-v0.2.0'));
       const cache = await caches.open(name);
       return cache.delete(new URL('./assets/icon-512.png',location.href).href);
     });
@@ -231,4 +250,143 @@ test('GitHub Pages相当のパスで旧版から更新し、通信切断とク�
     disconnectIcon = false;
     await context.close();
   }
+});
+
+test('スマートフォン幅で文章を表示し、学習履歴だけをリセットできる', {timeout:15000}, async()=>{
+  const context=await browser.newContext({hasTouch:true,isMobile:true,viewport:{width:390,height:720}});
+  try {
+    await seed(context);
+    const page=await context.newPage();
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(base);
+    await stageTwo(page,node=>node.tap());
+    const joystick=page.locator('#joystick');
+    await joystick.scrollIntoViewIfNeeded();
+    const box=await joystick.boundingBox();
+    const cdp=await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{
+      x:box.x+box.width*.85,y:box.y+box.height*.5,
+    }]});
+    try { await page.waitForFunction(atPixel,{axis:'x',goal:91,sense:1}); }
+    finally { await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); }
+    await page.getByRole('button',{name:'調べる',exact:true}).tap();
+    await page.getByRole('heading',{name:'兵士の依頼'}).waitFor();
+    const reading=await page.locator('.reading').evaluate(node=>({
+      width:node.getBoundingClientRect().width, text:parseFloat(getComputedStyle(node).fontSize),
+    }));
+    assert.ok(reading.width<390 && reading.text>=18);
+    await page.getByRole('button',{name:'閉じる'}).tap();
+    await page.getByRole('button',{name:'学習履歴',exact:true}).tap();
+    await page.getByRole('button',{name:'学習履歴を削除'}).tap();
+    await page.getByRole('button',{name:'削除を実行'}).tap();
+    const persisted=await page.evaluate(()=>({
+      progress:JSON.parse(localStorage.getItem('reading-dungeon-v1:progress')),
+      history:JSON.parse(localStorage.getItem('reading-dungeon-v1:history')),
+    }));
+    assert.equal(persisted.progress.unlocked,2);
+    assert.equal(persisted.progress.weapon,progress.weapon);
+    assert.deepEqual(persisted.history,[]);
+    assert.deepEqual(errors,[]);
+  } finally { await context.close(); }
+});
+
+test('問題管理の追加・入力チェック・編集・複製・削除・書き出し・再読込・テストプレイ', {timeout:30000}, async()=>{
+  const context=await browser.newContext({acceptDownloads:true});
+  try {
+    await seed(context);
+    const page=await context.newPage();
+    page.setDefaultTimeout(5000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(base);
+    await page.locator('#start:enabled').waitFor();
+    await page.getByRole('button',{name:'問題管理'}).click();
+    await page.getByRole('button',{name:'問題を追加'}).click();
+    await page.getByLabel('目標',{exact:true}).fill('');
+    await page.getByRole('button',{name:'入力をチェック'}).click();
+    await page.getByText(/問題ID、ステージ、難易度/).waitFor();
+    await page.getByLabel('目標',{exact:true}).fill('テスト専用の目標');
+    await page.getByRole('button',{name:'下書きを保存'}).click();
+    await page.getByText('このブラウザに下書きを保存しました。').waitFor();
+    await page.getByLabel('解説',{exact:true}).fill('編集済みの解説');
+    await page.getByRole('button',{name:'下書きを保存'}).click();
+    assert.equal(await page.getByLabel('解説',{exact:true}).inputValue(),'編集済みの解説');
+    const saved=await page.getByLabel('問題ID',{exact:true}).inputValue();
+    await page.getByRole('button',{name:'複製',exact:true}).click();
+    assert.notEqual(await page.getByLabel('問題ID',{exact:true}).inputValue(),saved);
+    await page.getByRole('button',{name:'下書きを保存'}).click();
+    await page.getByRole('button',{name:'削除',exact:true}).click();
+    await page.getByRole('button',{name:'削除を確定'}).click();
+    await page.getByLabel('問題を選択').selectOption(saved);
+    await page.getByLabel('目標',{exact:true}).fill('未保存のテスト目標');
+    await page.getByRole('button',{name:'テストプレイ',exact:true}).click();
+    await page.getByRole('button',{name:'テストプレイ終了'}).waitFor();
+    assert.equal(await page.locator('#mission').innerText(),'未保存のテスト目標');
+    await page.getByRole('button',{name:'テストプレイ終了'}).click();
+    assert.equal(await page.getByLabel('目標',{exact:true}).inputValue(),'未保存のテスト目標');
+
+    for (const [label,name,mimeType] of [
+      ['JSONを書き出す','questions.json','application/json'],
+      ['Excel用CSVを書き出す','questions.csv','text/csv'],
+    ]) {
+      const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:label}).click()]);
+      const content=await readFile(await download.path());
+      await page.getByLabel('JSON・CSVを読み込む').setInputFiles({name,mimeType,buffer:content});
+      await page.getByRole('button',{name:'下書きを読み込み内容で置換'}).click();
+      await page.getByText('読み込んだ問題を下書きに保存しました。').waitFor();
+    }
+    const stored=await page.evaluate(()=>{
+      const get=key=>JSON.parse(localStorage.getItem('reading-dungeon-v1:'+key));
+      return {bank:get('question-drafts-v2'),progress:get('progress'),history:get('history')};
+    });
+    assert.equal(stored.bank.length,51);
+    assert.equal(stored.bank.find(q=>q.id===saved).explanation,'編集済みの解説');
+    assert.deepEqual(stored.progress,progress);
+    assert.deepEqual(stored.history,history);
+    assert.deepEqual(errors,[]);
+  } finally {await context.close();}
+});
+
+test('洞窟の記録からボスの広間に入り、戦闘中も文章を読み直せる', {timeout:20000}, async()=>{
+  const context=await browser.newContext({viewport:{width:1200,height:850}});
+  try {
+    await seed(context,false,{...progress,unlocked:3,cleared:[1,2]});
+    const page=await context.newPage();
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.goto(base);
+    await page.locator('#start:enabled').click();
+    await page.getByRole('button',{name:/STAGE 3/}).click();
+    async function move(key,axis,goal,sense=1) {
+      await page.keyboard.down(key);
+      try {await page.waitForFunction(atPixel,{axis,goal,sense},{timeout:5000});}
+      finally {await page.keyboard.up(key);}
+    }
+    for (const [x,title] of [[96,'冒険者の日記'],[137,'岩の広間の観察']]) {
+      await move('ArrowRight','x',x);
+      await page.keyboard.press('KeyE');
+      await page.getByRole('heading',{name:title}).waitFor();
+      await page.keyboard.press('Escape');
+    }
+    await move('ArrowRight','x',215);
+    await page.keyboard.press('KeyE');
+    await page.getByRole('button',{name:/^最初は氷と剣。変化後は衝撃をしのぎ/}).click();
+    await move('ArrowUp','y',146,-1);
+    await move('ArrowRight','x',289);
+    await page.keyboard.press('KeyE');
+    await page.waitForFunction(atPixel,{axis:'x',goal:330,sense:1});
+    await page.keyboard.down('ArrowLeft');
+    await delay(550);
+    await page.keyboard.up('ArrowLeft');
+    assert.equal(await page.evaluate(atPixel,{axis:'x',goal:321,sense:-1}),false);
+    await page.keyboard.press('KeyR');
+    await page.getByRole('button',{name:'岩の広間の観察'}).click();
+    assert.match(await page.locator('.reading').innerText(),/回避/);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Digit4');
+    await page.getByRole('button',{name:/雷/}).waitFor();
+    assert.equal(await page.locator('[data-slot="3"]').getAttribute('aria-pressed'),'true');
+    assert.deepEqual(errors,[]);
+  } finally {await context.close();}
 });
