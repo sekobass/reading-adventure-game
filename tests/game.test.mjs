@@ -240,17 +240,18 @@ test('手当たり次第では計画も探索も進められない',()=>{
 });
 
 test('炎・氷・雷の着弾で固有の状態異常が発生し、MPが回復する',()=>{
-  for (const spell of spells.filter(Boolean)) {
+  for (const [kind,status] of [['fire','burn'],['ice','freeze'],['thunder','shock']]) {
+    const slot=spells.findIndex(spell=>spell?.id===kind);
     const {game}=run(questions[0]);
     const enemy=game.enemies[0];
     Object.assign(enemy,{x:100,y:219,rest:2});
     Object.assign(game.player,{x:70,y:219,mp:0,direction:[1,0]});
-    game.slot=spells.indexOf(spell);
+    game.slot=slot;
     game.cast();
     assert.equal(game.projectiles.length,0);
     advance(game,3.2);
-    useMagic(game,enemy,spell.id);
-    assert.equal(enemy.status,spell.effect);
+    useMagic(game,enemy,kind);
+    assert.equal(enemy.status,status);
     assert.ok(game.player.cast>0);
   }
 });
@@ -386,6 +387,7 @@ test('戦闘中の扉越しにボスへ剣や雷を当てられない',()=>{
   for (const id of q.sequence.order) use(game,id);
   use(game,'gate');
   const boss=game.enemies.find(e=>e.boss);
+  game.enemies.find(e=>e.role==='support').hp=0;
   const {x,y}=game.stage.arena;
   // Put both actors close enough to hit if the closed door were ignored.
   Object.assign(game.player,{x:x-7,y,direction:[1,0]});
@@ -396,4 +398,12 @@ test('戦闘中の扉越しにボスへ剣や雷を当てられない',()=>{
   assert.equal(boss.hp,hp);
   assert.equal(boss.status,null);
   assert.equal(game.projectiles.length,0);
+
+  // Positive control: equivalent range, both actors on the same side.
+  Object.assign(game.player,{x:x+22,y,cast:0,attack:0,direction:[1,0]});
+  Object.assign(boss,{x:x+50,y,exposed:0});
+  useMagic(game,boss,'thunder');
+  assert.equal(boss.status,'shock');
+  game.attack();
+  assert.ok(boss.hp<hp);
 });
