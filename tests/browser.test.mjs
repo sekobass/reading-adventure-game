@@ -11,7 +11,7 @@ const scope = '/reading-adventure-game/';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const mime = { html:'text/html', js:'text/javascript', css:'text/css', json:'application/json',
   webmanifest:'application/manifest+json', png:'image/png' };
-let server, browser, base, legacyWorker = false, disconnectIcon = false;
+let server, browser, base, kingdomUpdate, legacyWorker = false, disconnectIcon = false;
 
 before(async () => {
   server = createServer(async (request, response) => {
@@ -20,7 +20,8 @@ before(async () => {
       response.writeHead(200,{'Content-Type':'text/html'}).end('<title>Worker lifecycle probe</title>');
       return;
     }
-    const file = resolve(root, path.slice(scope.length) || 'index.html');
+    const relative=path.slice(scope.length);
+    const file=resolve(root,relative.endsWith('/') || !relative ? relative+'index.html' : relative);
     if (!path.startsWith(scope) || !file.startsWith(resolve(root)+sep)) {
       response.writeHead(404).end();
       return;
@@ -33,7 +34,8 @@ before(async () => {
       const content = legacyWorker && path === scope+'sw.js'
         ? `self.addEventListener('install', event => event.waitUntil(caches.open('reading-dungeon-'+self.registration.scope+'-v0.1.1')));
            self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));`
-        : await readFile(file);
+        : kingdomUpdate && relative==='kingdom/data/questions.json' && request.url.includes('refresh=1')
+          ? kingdomUpdate : await readFile(file);
       response.writeHead(200, {
         'Content-Type': mime[file.split('.').at(-1)] ?? 'application/octet-stream',
         'Cache-Control': 'no-store',
@@ -385,8 +387,133 @@ test('洞窟の記録からボスの広間に入り、戦闘中も文章を読�
     assert.match(await page.locator('.reading').innerText(),/回避/);
     await page.keyboard.press('Escape');
     await page.keyboard.press('Digit4');
-    await page.getByRole('button',{name:/雷/}).waitFor();
-    assert.equal(await page.locator('[data-slot="3"]').getAttribute('aria-pressed'),'true');
+    await page.locator('[data-slot="3"][aria-pressed="true"]').waitFor();
     assert.deepEqual(errors,[]);
+  } finally {await context.close();}
+});
+
+test('七つの封印で証言を集めて判断し、旧版を保持したままセーブを復元する', {timeout:35000}, async()=>{
+  const context=await browser.newContext({acceptDownloads:true,viewport:{width:1280,height:900}});
+  try {
+    await seed(context);
+    const page=await context.newPage();
+    page.setDefaultTimeout(6000);
+    const errors=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    const kingdom=new URL('./kingdom/',base).href;
+    await page.goto(kingdom);
+    await page.locator('#start:enabled').click();
+    async function move(key,axis,goal,sense=1) {
+      await page.keyboard.down(key);
+      try {await page.waitForFunction(atPixel,{axis,goal,sense},{timeout:6000});}
+      finally {await page.keyboard.up(key);}
+    }
+    const investigate=()=>page.keyboard.press('KeyE');
+    for (const [x,heading] of [[96,'水車番の証言'],[166,'水車番の手帳'],[227,'北門周辺の控え']]) {
+      await move('ArrowRight','x',x);
+      await investigate();
+      await page.getByRole('heading',{name:heading}).waitFor();
+      await page.keyboard.press('Escape');
+    }
+    await move('ArrowRight','x',268);
+    await investigate();
+    await page.getByRole('button',{name:'下流の石段',exact:true}).click();
+    await page.getByRole('button',{name:/出発時点で通れたのは石段/}).click();
+    await page.getByRole('checkbox',{name:'水車番の証言'}).check();
+    await page.getByRole('checkbox',{name:'水車番の手帳'}).check();
+    await page.getByRole('button',{name:'判断を提出'}).click();
+    await move('ArrowLeft','x',64,-1);
+    await move('ArrowUp','y',75,-1);
+    await investigate();
+    await page.getByRole('heading',{name:'ミッションクリア'}).waitFor();
+    await page.getByRole('button',{name:'次のミッション'}).click();
+    await page.getByRole('heading',{name:'鐘番の隠れ部屋'}).waitFor();
+    await page.getByRole('button',{name:'設定',exact:true}).click();
+    await page.getByRole('button',{name:'セーブのバックアップ・復元'}).click();
+    const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:'バックアップを書き出す'}).click()]);
+    const content=await readFile(await download.path());
+    const backup=JSON.parse(content);
+    assert.deepEqual(backup.progress.cleared,[1]);
+    assert.equal(backup.history[0].reasonsCorrect,1);
+    await page.getByLabel('復元するバックアップ').setInputFiles({name:'seven-seals-save.json',mimeType:'application/json',buffer:content});
+    await page.getByRole('button',{name:'内容を確認'}).click();
+    await page.getByRole('button',{name:'復元する'}).click();
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('reading-dungeon-v1:progress'))),progress);
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('reading-dungeon-v1:history'))),history);
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('seven-seals-v1:snapshot')).progress.cleared),[1]);
+    await page.waitForFunction(()=>navigator.serviceWorker.controller?.scriptURL.includes('/kingdom/sw.js'));
+    await context.setOffline(true);
+    await page.goto(kingdom+'?offline=1');
+    await page.locator('#start:enabled').waitFor();
+    await context.setOffline(false);
+    await page.getByRole('link',{name:'Ver.0.2へ戻る'}).click();
+    await page.locator('#start:enabled').waitFor();
+    assert.match(await page.title(),/謎解きダンジョン/);
+    assert.deepEqual(errors,[]);
+  } finally {await context.close();}
+});
+
+test('七つの封印をスマートフォン幅でタッチ操作できる', {timeout:15000}, async()=>{
+  const context=await browser.newContext({hasTouch:true,isMobile:true,viewport:{width:390,height:760}});
+  try {
+    const page=await context.newPage();
+    await page.goto(new URL('./kingdom/',base).href);
+    await page.locator('#start:enabled').tap();
+    await page.locator('#joystick').scrollIntoViewIfNeeded();
+    const box=await page.locator('#joystick').boundingBox();
+    const cdp=await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x+box.width*.86,y:box.y+box.height*.5}]});
+    try {await page.waitForFunction(atPixel,{axis:'x',goal:96,sense:1});}
+    finally {await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
+    await page.getByRole('button',{name:'調べる',exact:true}).tap();
+    await page.getByRole('heading',{name:'水車番の証言'}).waitFor();
+    assert.ok(await page.locator('.reading').evaluate(e=>e.getBoundingClientRect().width<390 && parseFloat(getComputedStyle(e).fontSize)>=18));
+  } finally {await context.close();}
+});
+
+test('七つの封印の問題データだけを更新し、オフラインでも検証済みの新版を使う', {timeout:15000}, async()=>{
+  const context=await browser.newContext();
+  try {
+    const page=await context.newPage();
+    const url=new URL('./kingdom/',base).href;
+    await page.goto(url);
+    await page.waitForFunction(()=>navigator.serviceWorker.controller?.scriptURL.includes('/kingdom/sw.js'));
+    await page.locator('#start:enabled').waitFor();
+    const bank=JSON.parse(await readFile(resolve(root,'kingdom/data/questions.json'),'utf8'));
+    bank[0].mission='配信データだけを更新したミッション';
+    kingdomUpdate=JSON.stringify(bank);
+    const bad=structuredClone(bank);
+    bad[0].plan.evidence=['存在しない証拠'];
+    for (const mode of ['更新','無効な配信','オフライン']) {
+      if (mode==='無効な配信') kingdomUpdate=JSON.stringify(bad);
+      await context.setOffline(mode==='オフライン');
+      await page.reload();
+      await page.locator('#start:enabled').waitFor();
+      await page.getByRole('button',{name:'問題管理'}).click();
+      assert.equal(await page.getByLabel('目標',{exact:true}).inputValue(),bank[0].mission);
+      await page.getByRole('button',{name:'閉じる'}).click();
+    }
+  } finally {kingdomUpdate=undefined;await context.close();}
+});
+
+test('新版の問題管理で証拠を含む下書きの保存とテストプレイができる', {timeout:15000}, async()=>{
+  const context=await browser.newContext({acceptDownloads:true});
+  try {
+    const page=await context.newPage();
+    await page.goto(new URL('./kingdom/',base).href);
+    await page.locator('#start:enabled').waitFor();
+    await page.getByRole('button',{name:'問題管理'}).click();
+    await page.getByRole('button',{name:'問題を追加'}).click();
+    await page.getByLabel('目標',{exact:true}).fill('検証用の調査');
+    await page.getByRole('button',{name:'下書きを保存'}).click();
+    await page.getByText('このブラウザに下書きを保存しました。').waitFor();
+    await page.getByRole('button',{name:'テストプレイ',exact:true}).click();
+    assert.equal(await page.locator('#mission').innerText(),'検証用の調査');
+    await page.getByRole('button',{name:'テストプレイ終了'}).click();
+    const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('button',{name:'JSONを書き出す'}).click()]);
+    const file=JSON.parse(await readFile(await download.path(),'utf8'));
+    assert.equal(file.length,13);
+    assert.ok(file.find(q=>q.mission==='検証用の調査').plan.evidence.length>=2);
+    assert.equal(await page.evaluate(()=>localStorage.getItem('seven-seals-v1:snapshot')),null);
   } finally {await context.close();}
 });
