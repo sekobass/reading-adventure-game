@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { Game } from '../kingdom/js/game.js';
 import { spells } from '../kingdom/js/combat.js';
 import { initial, newRecord, historyCsv } from '../kingdom/js/storage.js';
-import { backupFormat, chooseVariant, discovery, readBackup, selectRoute, routeClosing } from '../kingdom/js/campaign.js';
+import { backupFormat, battleGuide, chooseVariant, discovery, readBackup, selectRoute, routeClosing } from '../kingdom/js/campaign.js';
 import { importQuestions, questionsCsv, validateBank, validateQuestion } from '../kingdom/js/question-data.js';
 
 const read=name=>JSON.parse(readFileSync(new URL('../kingdom/data/'+name+'.json',import.meta.url)));
@@ -21,7 +21,7 @@ function make(q) {
 function prepare(game) {
   const p=game.question.plan;
   for (const id of p.sources) game.notes.add(id);
-  game.propose(index(p.options),index(p.reasons),p.evidence);
+  game.propose(index(p.options));
 }
 function advance(game,seconds) {
   for (let dt=0;dt<seconds;dt+=.02) game.tick(.02,0,0);
@@ -76,42 +76,55 @@ function fight(game,boss) {
   assert.equal(game.blocked(game.stage.arena.x+4,145,6),false);
 }
 
-for (const q of questions) test('七つの封印 '+q.id+' の証拠、配置、クリア',()=>{
+for (const q of questions) test('七つの封印 '+q.id+' の読解、配置、クリア',()=>{
   const {game,events}=make(q);
   const p=q.plan;
-  game.propose(index(p.options),index(p.reasons),p.evidence);
+  game.propose(index(p.options));
   assert.ok(!game.flags.has('planned'));
   prepare(game);
   assert.ok(game.flags.has('planned'));
-  if (q.sequence) {
-    for (const id of q.sequence.order) operate(game,id);
+  operate(game,p.destination);
+  if (game.stage.arena) {
     operate(game,'gate');
     const boss=game.enemies.find(e=>e.boss);
     assert.ok(boss && game.arenaActive);
     assert.equal(game.clear({x:315,y:145},boss),false);
     fight(game,boss);
-  } else operate(game,q.rules.find(rule=>rule.then.win).target);
+  }
   assert.equal(events.wins,1);
 });
 
-test('総当たりと攻撃の連打では作戦を通せない。再挑戦では資料が変わる',()=>{
+test('誤答3回後も増援・ロックが発生せず、同じ問題を正答してクリアできる',()=>{
   const q=questions[0], {game,events}=make(q), p=q.plan;
+  const roster=game.enemies.map(e=>e.id);
   for (const id of p.sources) game.notes.add(id);
-  for (let i=0;i<120;i++) {
-    game.attack(i%2===1);
-    game.cast();
-    operate(game,q.rules.find(rule=>rule.then.win).target);
-    advance(game,.12);
-  }
-  game.propose(index(p.options),index(p.reasons),[]);
-  game.propose(index(p.options),index(p.reasons),[...p.evidence,'n3']);
-  game.propose(index(p.options),index(p.reasons),p.evidence);
-  assert.equal(events.wrong,2);
+  const wrong=p.options.findIndex(option=>!option.correct);
+  for (let i=0;i<3;i++) game.propose(wrong);
+  assert.equal(events.wrong,3);
+  assert.equal(game.planAttempts,3);
+  assert.deepEqual(game.enemies.map(e=>e.id),roster);
   assert.ok(!game.flags.has('planned'));
-  assert.ok(!game.finished);
-  assert.ok(game.enemies.some(e=>e.id==='patrol'));
-  assert.equal(chooseVariant(questions,1,game.save).id,'k1-1');
-  assert.equal(chooseVariant(questions,1,game.save,true).id,'k1-2');
+  game.propose(index(p.options));
+  assert.ok(game.flags.has('planned'));
+  const wrongPlace=q.rules.find(rule=>rule.wrong).target;
+  for (let i=0;i<3;i++) operate(game,wrongPlace);
+  operate(game,p.destination);
+  assert.equal(events.wins,1);
+});
+
+test('設定に一致する問題を全5レベルで出し、同じレベルの再挑戦では別問題になる',()=>{
+  const progress=initial();
+  assert.equal(progress.settings.reading,3);
+  for (const level of [1,2,3,4,5]) {
+    progress.settings.reading=level;
+    for (const {id} of stages) {
+      const a=chooseVariant(questions,id,progress);
+      const b=chooseVariant(questions,id,progress,true);
+      assert.equal(a.difficulty,level);
+      assert.equal(b.difficulty,level);
+      assert.notEqual(a.id,b.id);
+    }
+  }
 });
 
 test('分岐と証拠帳を保存・復元し、別版のバックアップをはじく',()=>{
@@ -130,20 +143,20 @@ test('分岐と証拠帳を保存・復元し、別版のバックアップを�
   assert.notDeepEqual(routes[0],routes[1]);
 });
 
-test('公開データの到達可能性とJSON・CSV往復、無効な証拠の検出',()=>{
+test('公開データの到達可能性とJSON・CSV往復、無効な強調箇所の検出',()=>{
   assert.equal(stages.length,6);
   assert.deepEqual(validateBank(questions,stages),[]);
   assert.deepEqual(importQuestions(JSON.stringify(questions),false),questions);
   assert.deepEqual(importQuestions(questionsCsv(questions),true),questions);
   const bad=structuredClone(questions[0]);
-  bad.plan.evidence.push('unknown');
+  bad.plan.highlights[0].quote='本文にない語句';
   assert.ok(validateQuestion(bad,stages).length);
 });
 
 test('新版の閉鎖扉は強攻撃と氷を遮り、同じ距離の広間内では凍結後に攻撃できる',()=>{
-  const {game}=make(questions.find(q=>q.id==='k2-1'));
+  const {game}=make(questions.find(q=>q.id==='k2-l3-1'));
   prepare(game);
-  for (const id of game.question.sequence.order) operate(game,id);
+  operate(game,game.question.plan.destination);
   operate(game,'gate');
   const boss=game.enemies.find(e=>e.boss);
   const {x,y}=game.stage.arena;
@@ -164,4 +177,29 @@ test('新版の閉鎖扉は強攻撃と氷を遮り、同じ距離の広間内�
   assert.equal(boss.status,'freeze');
   game.attack(true);
   assert.ok(boss.hp<hp);
+});
+
+test('60問の正解一覧と資料数・選択肢・文の長さを照合する',()=>{
+  const reviewed=[
+    ['下流の石段','水車小屋','北門','南の広場','下流の石段','水車小屋','南の広場','北門','下流の石段','水車小屋'],
+    ['星の印','月の印','花の印','鳥の印','月の印','花の印','鳥の印','星の印','花の印','月の印'],
+    ['港の荷物箱','橋番の小屋','村の倉','広場の机','広場の机','港の荷物箱','橋番の小屋','村の倉','村の倉','橋番の小屋'],
+    ['赤のレバー','青のレバー','黄のレバー','白のレバー','青のレバー','黄のレバー','白のレバー','赤のレバー','黄のレバー','白のレバー'],
+    ['青い灯','銀の灯','赤い灯','黄色い灯','銀の灯','赤い灯','黄色い灯','青い灯','青い灯','銀の灯'],
+    ['根の印','石の印','葉の印','雲の印','石の印','葉の印','雲の印','根の印','葉の印','雲の印'],
+  ];
+  assert.equal(questions.length,60);
+  for (const q of questions) {
+    const variant=Number(q.id.at(-1));
+    const answer=reviewed[q.stageId-1][(q.difficulty-1)*2+variant-1];
+    assert.equal(q.plan.options.find(o=>o.correct).text,answer,q.id);
+    assert.equal(q.objects.find(o=>o.id===q.plan.destination).name,answer,q.id);
+    const sources=q.objects.filter(o=>o.text);
+    assert.equal(sources.length,q.difficulty<=3?1:2,q.id);
+    assert.ok(sources.every(o=>[...o.text].length<=100),q.id);
+    assert.ok(q.plan.options.length>=3 && q.plan.options.length<=4,q.id);
+    const guides=battleGuide(q);
+    assert.equal(guides.length,q.stageId%2?0:1);
+    if (guides.length) assert.equal(guides[0].steps.length,3);
+  }
 });
