@@ -140,7 +140,8 @@ for (const touch of [false,true]) {
       await page.getByRole('heading',{name:'荷運びの記録'}).waitFor();
       await tap(page.getByRole('button',{name:'閉じる'}));
       await move('ArrowRight',186);
-      await inspect();
+      // The legacy pointerdown can send its subsequent click to a plan choice.
+      await page.keyboard.press('KeyE');
       await page.getByRole('heading',{name:'攻略計画'}).waitFor();
       assert.equal(await page.locator('.plan-choices button').count(),4);
       await tap(page.getByRole('button',{name:/西で燃料を受け取ってから/}));
@@ -459,15 +460,26 @@ test('七つの封印をスマートフォン幅でタッチ操作できる', {t
     const page=await context.newPage();
     await page.goto(new URL('./kingdom/',base).href);
     await page.locator('#start:enabled').tap();
-    await page.locator('#joystick').scrollIntoViewIfNeeded();
-    const box=await page.locator('#joystick').boundingBox();
     const cdp=await context.newCDPSession(page);
-    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x+box.width*.86,y:box.y+box.height*.5}]});
-    try {await page.waitForFunction(atPixel,{axis:'x',goal:96,sense:1});}
-    finally {await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
-    await page.getByRole('button',{name:'調べる',exact:true}).tap();
-    await page.getByRole('heading',{name:'水車番の証言'}).waitFor();
-    assert.ok(await page.locator('.reading').evaluate(e=>e.getBoundingClientRect().width<390 && parseFloat(getComputedStyle(e).fontSize)>=18));
+    async function rightTo(goal) {
+      const joystick=page.locator('#joystick');
+      await joystick.scrollIntoViewIfNeeded();
+      const box=await joystick.boundingBox();
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:box.x+box.width*.86,y:box.y+box.height*.5}]});
+      try {await page.waitForFunction(atPixel,{axis:'x',goal,sense:1});}
+      finally {await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});}
+      await page.getByRole('button',{name:'調べる',exact:true}).tap();
+    }
+    for (const [goal,title] of [[96,'水車番の証言'],[166,'水車番の手帳'],[227,'北門周辺の控え']]) {
+      await rightTo(goal);
+      await page.getByRole('heading',{name:title}).waitFor();
+      assert.ok(await page.locator('.reading').evaluate(e=>e.getBoundingClientRect().width<390 && parseFloat(getComputedStyle(e).fontSize)>=18));
+      await page.getByRole('button',{name:'閉じる'}).tap();
+    }
+    await rightTo(268);
+    await page.getByRole('heading',{name:'攻略計画'}).waitFor();
+    await page.getByRole('button',{name:'下流の石段',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'計画の選択に戻る'}).count(),0);
   } finally {await context.close();}
 });
 

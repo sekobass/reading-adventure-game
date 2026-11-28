@@ -69,6 +69,12 @@ export function input({ playable, action }) {
   }
 
   for (const button of document.querySelectorAll('[data-action]')) {
+    // Interaction can open a dialog. Let the button click finish before the
+    // dialog replaces its target so that the touch does not select an answer.
+    if (button.dataset.action==='interact') {
+      button.addEventListener('click',()=>{if (playable()) action('interact');});
+      continue;
+    }
     button.addEventListener('pointerdown',event => {
       if (!playable()) return;
       event.preventDefault();
