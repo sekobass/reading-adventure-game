@@ -1,9 +1,9 @@
 const scope = self.registration.scope;
 const cachePrefix = `reading-dungeon-${scope}-`;
-const cacheName = cachePrefix + 'v0.1.1';
+const cacheName = cachePrefix + 'v0.2.0';
 const files = [
   './', './index.html', './css/style.css', './js/main.js', './js/game.js',
-  './js/render.js', './js/input.js', './js/storage.js', './data/stages.json',
+  './js/render.js', './js/combat.js', './js/question-data.js', './js/question-editor.js', './js/input.js', './js/storage.js', './data/stages.json',
   './data/questions.json', './manifest.webmanifest', './assets/icon-192.png',
   './assets/icon-512.png',
 ];

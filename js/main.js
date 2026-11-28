@@ -2,6 +2,7 @@ import { Game, maxHP, maxMP } from './game.js';
 import { renderer } from './render.js';
 import { initial, storage, newRecord, historyCsv } from './storage.js';
 import { input } from './input.js';
+import { questionEditor } from './question-editor.js';
 
 const $ = selector => document.querySelector(selector);
 const modal = $('#modal');
@@ -9,13 +10,14 @@ const body = $('#dialog-body');
 const draw = renderer($('#world'));
 const touchDevice = matchMedia('(any-pointer: coarse)');
 let stages, questions, game, record, panel, reading, toastTimer, audio;
+let editorBank, previewSession;
 const store = storage(() => toast('ブラウザの保存を利用できません。'));
 let save = store.read('progress', initial());
 save.settings = { ...initial().settings, ...save.settings };
 save.variants ??= {};
 let records = store.read('history', []);
-const writeSave = () => store.write('progress',save);
-const writeHistory = () => store.write('history',records);
+const writeSave = () => !previewSession && store.write('progress',save);
+const writeHistory = () => !previewSession && store.write('history',records);
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -104,7 +106,8 @@ function updateHUD() {
   if (!game) return;
   const p = game.player;
   const stats = `Lv.${save.level}　HP ${p.hp}/${maxHP(save)}　MP ${Math.floor(p.mp)}/${maxMP(save)}　${save.gold} G`;
-  if ($('#stats').textContent !== stats) $('#stats').textContent = stats;
+  const cooldown = p.cast > 0 ? '　魔法準備中' : '';
+  if ($('#stats').textContent !== stats + cooldown) $('#stats').textContent = stats + cooldown;
   document.querySelectorAll('[data-slot]').forEach(button => {
     const active = +button.dataset.slot === game.slot;
     button.classList.toggle('active',active);
@@ -115,8 +118,9 @@ function syncScreen() {
   $('#title').hidden = Boolean(game);
   for (const name of ['restart','pause','field-notes','field-menu']) $('#'+name).hidden = !game;
   $('#clear-result').hidden = !game?.finished;
+  $('#end-preview').hidden = !previewSession;
   $('#journal').disabled = !game;
-  $('#chapter').textContent = game ? `STAGE ${String(game.stage.id).padStart(2,'0')}` : '冒険の書';
+  $('#chapter').textContent = game ? `${previewSession?'テストプレイ / ':''}STAGE ${String(game.stage.id).padStart(2,'0')}` : '冒険の書';
   $('#heading').textContent = game?.stage.name ?? '謎解きダンジョン';
   $('#location').textContent = game ? '◆　'+game.stage.place : '◆　失われた秘宝';
   $('#mission').textContent = game?.question.mission ?? '文章を手がかりに、失われた秘宝を探し出そう。';
@@ -126,7 +130,19 @@ function syncScreen() {
   updateHUD();
 }
 
+function shuffled(items) {
+  const list=items.slice();
+  for (let i=list.length-1;i>0;i--) {
+    const j=Math.floor(Math.random()*(i+1));
+    [list[i],list[j]]=[list[j],list[i]];
+  }
+  return list;
+}
 function start(id, repeat = false) {
+  if (previewSession) {
+    close();
+    return launchGame(stages.find(s=>s.id===previewSession.draft.question.stageId),previewSession.draft.question);
+  }
   const stage = stages?.find(s=>s.id === id);
   if (!stage || id>save.unlocked) return;
   close();
@@ -134,17 +150,52 @@ function start(id, repeat = false) {
   const key = id + ':' + save.settings.reading;
   const choice = repeat || key in save.variants ? ((save.variants[key] ?? -1)+1) % variants.length : 0;
   save.variants[key] = choice;
-  const problem = variants[choice];
+  launchGame(stage,variants[choice]);
+}
+function launchGame(stage,problem) {
   record = newRecord(problem);
   records.push(record);
   writeHistory();
   writeSave();
-  game = new Game(stage,problem,save,{
-    toast, sound, wrong, read, defeat, complete, persist:writeSave,
+  const plan={...problem.plan,options:shuffled(problem.plan.options)};
+  if (plan.reasons) plan.reasons=shuffled(plan.reasons);
+  game = new Game(stage,{...problem,plan},save,{
+    toast, sound, wrong, read, defeat, complete, plan:showPlan, persist:writeSave,
   });
   syncScreen();
   toast('光る印の人や記録を調べよう。');
 }
+function showEditor(draft) {
+  if (!questions || previewSession) return;
+  open('editor','保護者向け　問題管理');
+  editorBank ??= store.read('question-drafts-v2',questions);
+  questionEditor(body,{
+    bank:editorBank,published:questions,stages,draft,
+    save(next) {
+      if (!store.write('question-drafts-v2',next)) return false;
+      editorBank=next;
+      return true;
+    },
+    preview(question,originalId) {
+      close();
+      previewSession={game,record,records,save,draft:{question,originalId}};
+      save=structuredClone(save);
+      records=[];
+      start(question.stageId);
+    },
+  });
+}
+
+function endPreview() {
+  if (!previewSession) return;
+  close();
+  const original=previewSession;
+  previewSession=undefined;
+  ({ game,record,records,save }=original);
+  syncScreen();
+  showEditor(original.draft);
+}
+
 function wrong(message) {
   record.mistakes.push(message);
   const n = record.mistakes.length;
@@ -193,6 +244,48 @@ function read(note, reread = false, fromJournal = false) {
     },true]);
   }
 }
+function showPlan(selectedIndex) {
+  const {plan}=game.question;
+  open('plan','攻略計画');
+  if (game.flags.has('planned')) {
+    paragraph('計画を確認した。マップで実行しよう。');
+    return;
+  }
+  if (game.planAttempts>=2) {
+    paragraph('この計画はいったん保留。別の記録で、根拠を確かめ直そう。');
+    paragraph(game.question.hints[1],'muted');
+    buttons(['別の記録で再挑戦',()=>start(game.stage.id,true),true]);
+    return;
+  }
+  const missing=plan.sources.filter(id=>!game.notes.has(id));
+  if (missing.length) {
+    paragraph('計画の前に、マップで次の記録を調べよう。');
+    for (const id of missing) paragraph(game.objects.find(o=>o.id===id).name);
+    return;
+  }
+  paragraph(selectedIndex===undefined?'記録の条件をすべて満たす計画を選ぼう。':'記録から計画の根拠を選ぼう。');
+  if (selectedIndex!==undefined) buttons(['計画の選択に戻る',()=>showPlan()]);
+  if (game.planAttempts) {
+    paragraph(game.question.hints[0],'muted');
+    buttons(['記録を読み直す',journal]);
+  }
+  const choices=el('div',undefined,'rows plan-choices');
+  const choicesToShow=selectedIndex===undefined?plan.options:plan.reasons;
+  choicesToShow.forEach((option,index)=>{
+    const button=el('button',option.text);
+    button.type='button';
+    button.addEventListener('click',()=>{
+      if (plan.reasons && selectedIndex===undefined) return showPlan(index);
+      game.propose(selectedIndex ?? index,selectedIndex===undefined?undefined:index);
+      if (game.flags.has('planned')) {
+        close();
+        toast('計画を確認した。マップで実行しよう。');
+      } else showPlan();
+    });
+    choices.append(button);
+  });
+  body.append(choices);
+}
 function journal() {
   if (!game) return;
   open('journal','ミッション・冒険の記録');
@@ -214,12 +307,7 @@ function defeat() {
   open('defeat','冒険者は力尽きた');
   paragraph('体力と魔力を回復して、入口からこのミッションを続けよう。');
   buttons(['入口へ戻る',()=>{
-    game.resetPlayer();
-    if (game.stage.id === 5 && game.flags.has('entered')) {
-      game.flags.delete('entered');
-      game.objects.find(o=>o.kind==='gate').open=false;
-      game.enemies = game.enemies.filter(e=>!e.win);
-    }
+    game.retry();
     close();
   },true],['別の問題に挑戦',()=>start(game.stage.id,true)]);
 }
@@ -241,7 +329,8 @@ function showClearResult() {
   open('complete',id===stages.length?'冒険クリア　失われた秘宝':'ステージクリア');
   passage(game.question.explanation);
   paragraph(record.firstSuccess?'初回成功　・　回復薬を1つ獲得':`読解の誤答 ${record.mistakes.length}回　・　回復薬を1つ獲得`);
-  buttons(id<stages.length?['次のステージ',()=>start(id+1),true]:['ステージ選択',stageMenu,true],
+  if (previewSession) buttons(['問題の編集に戻る',endPreview,true],['テストをやり直す',()=>start(id,true)]);
+  else buttons(id<stages.length?['次のステージ',()=>start(id+1),true]:['ステージ選択',stageMenu,true],
     ['もう一度挑戦',()=>start(id,true)]);
   $('#dialog-title').focus();
 }
@@ -255,6 +344,7 @@ function pause() {
   }]);
 }
 function stageMenu() {
+  if (previewSession) return endPreview();
   open('stages','ステージ選択');
   if (!stages) return paragraph('ステージデータを読み込んでいます。');
   const rows = el('div',undefined,'rows');
@@ -286,6 +376,7 @@ function bag() {
   }
 }
 function confirmClear(key) {
+  if (previewSession) return;
   const history = key==='history';
   open('confirm',history?'学習履歴の削除':'冒険の初期化');
   paragraph(history?'このブラウザに保存された学習履歴をすべて削除します。':'ステージ進行、レベル、装備、所持品、設定を初期化します。');
@@ -394,20 +485,23 @@ function perform(action) {
     if (action==='interact') showClearResult();
     return;
   }
-  if (action==='cycle') game.slot = (game.slot+1)%3;
+  if (action==='cycle') game.slot = (game.slot+1)%4;
   else if (action.startsWith('slot')) game.slot = +action.at(-1);
   else if (action==='attack') game.attack();
   else if (action==='cast') game.cast();
+  else if (action==='guard') game.guard();
+  else if (action==='dodge') game.dodge();
   else if (action==='interact') game.interact();
 }
 const controls = input({playable,action:perform});
 for (const [selector,callback] of [
   ['#journal',journal],['#field-notes',journal],['#pause',pause],['#field-menu',pause],
   ['#bag',bag],['#restart',()=>start(game.stage.id,true)],
-  ['#clear-result',showClearResult],
+  ['#clear-result',showClearResult],['#end-preview',endPreview],
   ['#start',()=>save.unlocked>1?stageMenu():start(1)],
   ['[data-panel="stages"]',stageMenu],['[data-panel="history"]',historyPanel],
   ['[data-panel="settings"]',settings],
+  ['[data-panel="editor"]',()=>showEditor()],
 ]) $(selector).addEventListener('click',callback);
 document.querySelectorAll('[data-slot]').forEach(button=>{
   button.addEventListener('click',()=>perform('slot'+button.dataset.slot));
