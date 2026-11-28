@@ -1,6 +1,6 @@
 const scope = self.registration.scope;
 const cachePrefix = `seven-seals-${scope}-`;
-const cacheName = cachePrefix + 'v1.0.0-dev.1';
+const cacheName = cachePrefix + 'v1.0.0-dev.2';
 const files = [
   './', './index.html', './css/style.css', './js/main.js', './js/game.js',
   './js/render.js', './js/combat.js', './js/campaign.js', './js/music.js', './js/question-data.js', './js/question-editor.js', './js/input.js', './js/storage.js', './data/stages.json',

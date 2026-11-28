@@ -113,19 +113,16 @@ export function questionEditor(container,{bank,published,stages,save,preview,dra
     const level=select(basic,'難易度',[1,2,3,4,5].map(i=>[i,'Lv.'+i]),selected.difficulty);
     const type=input(basic,'問題分類',selected.type);
     const mission=input(form,'目標',selected.mission);
+    const prompt=input(form,'質問',selected.plan.prompt);
     const notes=new Map();
     for (const o of selected.objects.filter(o=>o.text)) notes.set(o.id,input(form,'問題文｜'+o.name,o.text,true));
     function choiceFields(region,title,items=[]) {
-      const choices=Array.from({length:5},(_,i)=>input(region,title+' '+(i+1)+(i===4?'（任意）':''),items[i]?.text ?? '',true));
+      const choices=Array.from({length:4},(_,i)=>input(region,title+' '+(i+1)+(i===3?'（任意）':''),items[i]?.text ?? '',true));
       const key=select(region,title+'の正解',choices.map((_,i)=>[i,String(i+1)]),Math.max(0,items.findIndex(o=>o.correct)));
       return ()=>choices.map((o,i)=>({text:o.value.trim(),...(i===Number(key.value)?{correct:true}:{})}))
-        .filter((o,i)=>i<4 || o.text);
+        .filter((o,i)=>i<3 || o.text);
     }
     const choices=choiceFields(form,'選択肢',selected.plan.options);
-    const reasonFields=node('fieldset');
-    form.append(reasonFields);
-    const reasons=choiceFields(reasonFields,'根拠',selected.plan.reasons);
-
     const hints=input(form,'ヒント（1行に1つ）',selected.hints.join('\n'),true);
     const explanation=input(form,'解説',selected.explanation,true);
     const order=input(form,'攻略順序（台座IDをコンマ区切り）',selected.sequence?.order.join(', ') ?? '');
@@ -141,7 +138,8 @@ export function questionEditor(container,{bank,published,stages,save,preview,dra
     advanced.append(node('summary','配置・正解条件・敵の詳細（JSON）'));
     form.append(advanced);
     const objects=json(advanced,'配置物・文章（JSON）',selected.objects);
-    const plan=json(advanced,'計画の場所・資料と正解証拠（JSON）',{target:selected.plan.target,sources:selected.plan.sources,evidence:selected.plan.evidence});
+    const {target,sources,destination,highlights}=selected.plan;
+    const plan=json(advanced,'案内板・資料・目的地・強調箇所（JSON）',{target,sources,destination,highlights});
     const rules=json(advanced,'実行条件と成果（JSON）',selected.rules);
     const enemyData=json(advanced,'敵（JSON）',selected.enemies);
     const sequence=json(advanced,'台座の条件（JSON）',selected.sequence ?? null);
@@ -176,7 +174,7 @@ export function questionEditor(container,{bank,published,stages,save,preview,dra
         id:id.value.trim(),stageId:Number(stage.value),difficulty:Number(level.value),
         type:type.value.trim(),mission:mission.value.trim(),explanation:explanation.value.trim(),
         objects:placements,rules:legal,enemies:actors,hints:hints.value.split('\n').map(s=>s.trim()).filter(Boolean),
-        plan:{...planData,options:choices(),reasons:reasons()},
+        plan:{...planData,prompt:prompt.value.trim(),options:choices()},
         ...(steps===null?{}:{sequence:steps}),...(end===null?{}:{completeWhen:end}),
       };
     };

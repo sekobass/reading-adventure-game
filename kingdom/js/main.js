@@ -3,7 +3,7 @@ import { music } from './music.js';
 import { renderer } from './render.js';
 import { initial, storage, newRecord, historyCsv } from './storage.js';
 import { input } from './input.js';
-import { backupFormat, chapters, chooseVariant, discovery, readBackup, routeClosing, selectRoute } from './campaign.js';
+import { backupFormat, battleGuide, chapters, chooseVariant, discovery, readBackup, routeClosing, selectRoute } from './campaign.js';
 import { validateBank } from './question-data.js';
 import { questionEditor } from './question-editor.js';
 
@@ -104,7 +104,25 @@ function applySettings() {
 }
 touchDevice.addEventListener('change',applySettings);
 
+function updateObjective() {
+  const box=$('#objective');
+  box.hidden=!game;
+  if (!game) return;
+  const {plan}=game.question;
+  const missing=plan.sources.filter(id=>!game.notes.has(id));
+  const title=game.objects.find(o=>o.id===plan.destination).name;
+  const text=game.finished?'ミッションクリア':game.arenaActive?'番人を倒そう。':
+    missing.length?missing.map(id=>game.objects.find(o=>o.id===id).name).join('と')+'を読もう。':
+    !game.flags.has('planned')?'文章を読んで、行動を選ぼう。':
+    game.flags.has('aligned')?'番人の門へ行こう。':title+'へ行き、調べよう。';
+  const current=$('#objective-text');
+  if (current.textContent!==text) current.textContent=text;
+  const choose=$('#choose-action');
+  choose.hidden=Boolean(missing.length || game.flags.has('planned'));
+}
+
 function updateHUD() {
+  updateObjective();
   if (!game) return;
   const p = game.player;
   const stats = `Lv.${save.level}　HP ${p.hp}/${maxHP(save)}　MP ${Math.floor(p.mp)}/${maxMP(save)}　気力 ${Math.floor(p.stamina)}`;
@@ -148,9 +166,6 @@ function start(id, repeat = false) {
   const stage=stages?.find(s=>s.id===id);
   if (!stage || id>save.unlocked) return;
   if (id>=5 && !save.route) return showRoute();
-  if (id===6 && (!save.archive[1] || !save.archive[3])) {
-    return toast('第1章と第2章の証拠を回収してから進もう。');
-  }
   const problem=chooseVariant(questions,id,save,repeat);
   if (!problem) return toast('このミッションの資料がありません。');
   close();
@@ -176,32 +191,30 @@ function launchGame(stage,problem) {
   records.push(record);
   writeSave();
   const plan={...problem.plan,options:shuffled(problem.plan.options)};
-  if (plan.reasons) plan.reasons=shuffled(plan.reasons);
   game = new Game(stage,{...problem,plan},save,{
     toast, sound, wrong, read, defeat, complete, plan:showPlan, persist:writeSave,
     tactics() {
       record.tacticalErrors++;
-      toast('攻撃が通らない。広間の記録を確かめよう。');
+      toast('攻撃が通らない。記録の「番人の戦い方」を見よう。');
       writeHistory();
     },
-    reason(correct,evidence) {
+    answer(correct) {
       record.attempts++;
-      record.reasonsCorrect+=Number(correct);
-      record.evidenceCorrect+=Number(evidence);
+      record.answersCorrect+=Number(correct);
       writeHistory();
     },
   });
   syncScreen();
-  toast(stage.id===5?routeClosing(save.route):'作戦卓を見つけ、現地で証言を集めよう。');
+  toast(stage.id===5?routeClosing(save.route):'画面の「次の目標」を見て進もう。');
 }
 function showEditor(draft) {
   if (!questions || previewSession) return;
   open('editor','保護者向け　問題管理');
-  editorBank ??= store.read('question-drafts-v2',questions);
+  editorBank ??= store.read('question-drafts-reading',questions);
   questionEditor(body,{
     bank:editorBank,published:questions,stages,draft,
     save(next) {
-      if (!store.write('question-drafts-v2',next)) return false;
+      if (!store.write('question-drafts-reading',next)) return false;
       editorBank=next;
       return true;
     },
@@ -228,32 +241,40 @@ function endPreview() {
 
 function wrong(message) {
   record.mistakes.push(message);
-  const n = record.mistakes.length;
-  if (n === 1) toast('うまくいかなかった。文章を読み直そう。');
-  else {
-    const hint = game.question.hints[Math.min(n-2,game.question.hints.length-1)];
-    record.hints += 1;
-    if (modal.open) paragraph(hint);
-    else toast(hint);
+  if (panel!=='plan') {
+    const destination=game.objects.find(o=>o.id===game.question.plan.destination);
+    toast(game.flags.has('aligned')?'番人の門へ行こう。':destination.name+'を調べよう。');
   }
   writeHistory();
 }
 const readingGlossary = {
+  水車小屋:'すいしゃごや', 下流:'かりゅう', 石段:'いしだん', 避難:'ひなん', 岩室:'いわむろ', 税関:'ぜいかん', 封印:'ふういん', 命令書:'めいれいしょ', 広間:'ひろま', 霧:'きり', 灯:'あかり', 覆:'おお',
   古代遺跡:'こだいいせき', 遺跡:'いせき', 洞窟:'どうくつ', 魔物:'まもの',
   冒険者:'ぼうけんしゃ', 台座:'だいざ', 扉:'とびら', 燃料:'ねんりょう',
   倉庫:'そうこ', 手当て:'てあて', 薬草:'やくそう', 番人:'ばんにん',
 };
 const readingTerm = new RegExp('('+Object.keys(readingGlossary).join('|')+')','g');
 
-function passage(text) {
-  const line = el('p',undefined,'reading');
-  for (const segment of text.split(readingTerm)) {
-    if (!Object.hasOwn(readingGlossary,segment)) line.append(segment);
-    else {
-      const ruby = el('ruby',segment);
-      ruby.append(el('rt',readingGlossary[segment]));
-      line.append(ruby);
+function passage(text,highlight) {
+  const line=el('p',undefined,'reading');
+  function rubyText(parent,value) {
+    for (const segment of value.split(readingTerm)) {
+      if (!Object.hasOwn(readingGlossary,segment)) parent.append(segment);
+      else {
+        const ruby=el('ruby',segment);
+        ruby.append(el('rt',readingGlossary[segment]));
+        parent.append(ruby);
+      }
     }
+  }
+  const match=highlight?text.indexOf(highlight):-1;
+  if (match<0) rubyText(line,text);
+  else {
+    rubyText(line,text.slice(0,match));
+    const mark=el('mark');
+    rubyText(mark,highlight);
+    line.append(mark);
+    rubyText(line,text.slice(match+highlight.length));
   }
   body.append(line);
 }
@@ -263,7 +284,8 @@ function read(note, reread = false, fromJournal = false) {
   if (reread) record.rereads += 1;
   writeHistory();
   reading = {record,since:performance.now()};
-  passage(note.text);
+  passage(note.text,game.planAttempts>=2 ? game.question.plan.highlights.find(h=>h.source===note.id)?.quote:undefined);
+  if (!game.flags.has('planned') && game.question.plan.sources.every(id=>game.notes.has(id))) buttons(['行動を選ぶ',showPlan]);
   if (note.delivery && !game.finished && !fromJournal) {
     if (game.flags.has(note.id)) paragraph('この依頼は達成済みです。','muted');
     else buttons(['品物を届ける',()=>{
@@ -274,78 +296,75 @@ function read(note, reread = false, fromJournal = false) {
     },true]);
   }
 }
-function showPlan(selectedIndex,reasonIndex) {
-  const {plan}=game.question;
-  open('plan','攻略計画');
-  if (game.flags.has('planned') && game.fieldFaults<2) {
-    paragraph('計画を確認した。マップで実行しよう。');
+function showPlan() {
+  if (!game) return;
+  const {plan,hints}=game.question;
+  const notes=plan.sources.map(id=>game.objects.find(o=>o.id===id));
+  open('plan','行動を選ぶ');
+  if (game.flags.has('planned')) {
+    paragraph($('#objective-text').textContent);
     return;
   }
-  if (game.planAttempts>=2 || game.fieldFaults>=2) {
-    paragraph('この計画はいったん保留。別の記録で、根拠を確かめ直そう。');
-    paragraph(game.question.hints[1],'muted');
-    buttons(['別の記録で再挑戦',()=>start(game.stage.id,true),true]);
-    return;
-  }
-  const missing=plan.sources.filter(id=>!game.notes.has(id));
+  const missing=notes.filter(note=>!game.notes.has(note.id));
   if (missing.length) {
-    paragraph('計画の前に、マップで次の記録を調べよう。');
-    for (const id of missing) paragraph(game.objects.find(o=>o.id===id).name);
+    paragraph(missing.map(note=>note.name).join('と')+'を先に読もう。');
     return;
   }
-  if (save.settings.reading===1) paragraph(game.question.hints[0],'muted');
-  if (game.planAttempts) {
-    paragraph(game.question.hints[0],'muted');
-    buttons(['記録を読み直す',journal]);
-  }
-  if (reasonIndex!==undefined) {
-    paragraph('判断を裏付ける資料をすべて選ぼう。関係があっても、根拠として不要な資料は除こう。');
-    const evidence=[];
-    for (const id of plan.sources) {
-      const note=game.objects.find(o=>o.id===id);
-      const checkbox=el('input');
-      checkbox.type='checkbox';
-      const label=el('label',undefined,'evidence-choice');
-      label.append(checkbox,document.createTextNode(note.name));
-      evidence.push({id,checkbox});
-      body.append(label);
+  const failures=game.planAttempts;
+  if (failures===1) paragraph('もう一度「'+notes.map(note=>note.name).join('」「')+'」を読もう。');
+  if (failures>=2) {
+    paragraph('色のついた文に注目しよう。');
+    for (const note of notes) {
+      body.append(el('h3',note.name));
+      passage(note.text,plan.highlights.find(h=>h.source===note.id)?.quote);
     }
-    buttons(['判断を提出',()=>{
-      game.propose(selectedIndex,reasonIndex,evidence.filter(e=>e.checkbox.checked).map(e=>e.id));
-      if (game.flags.has('planned')) {
-        close();
-        toast('証拠がそろった。現地で計画を実行しよう。');
-      } else showPlan();
-    },true],['根拠の選択に戻る',()=>showPlan(selectedIndex)]);
-    return;
   }
-  paragraph(selectedIndex===undefined?'調べた記録から、実行する計画を選ぼう。':'その計画を選んだ理由は？');
-  if (selectedIndex!==undefined) buttons(['計画の選択に戻る',()=>showPlan()]);
+  if (failures>=3) paragraph('ヒント　'+hints[0],'clue');
+  paragraph(plan.prompt,'prompt');
   const choices=el('div',undefined,'rows plan-choices');
-  const choicesToShow=selectedIndex===undefined?plan.options:plan.reasons;
-  choicesToShow.forEach((option,index)=>{
+  plan.options.forEach((option,index)=>{
     const button=el('button',option.text);
     button.type='button';
-    button.addEventListener('click',()=>selectedIndex===undefined?showPlan(index):showPlan(selectedIndex,index));
+    button.addEventListener('click',()=>{
+      game.propose(index);
+      if (game.flags.has('planned')) {
+        close();
+        updateObjective();
+        toast($('#objective-text').textContent);
+      } else {
+        if (game.planAttempts===2 || game.planAttempts===3) {
+          record.hints++;
+          writeHistory();
+        }
+        showPlan();
+      }
+    });
     choices.append(button);
   });
   body.append(choices);
+  buttons(...notes.map(note=>[note.name+'を読み直す',()=>read(note,true)]));
 }
+
 function journal() {
   if (!game) return;
   open('journal','ミッション・冒険の記録');
   paragraph(game.question.mission);
-  const notes = game.objects.filter(o=>game.notes.has(o.id));
-  if (!notes.length) paragraph('まだ記録がありません。マップで人や石碑を調べよう。','muted');
+  const notes=game.objects.filter(o=>game.notes.has(o.id));
+  if (!notes.length) paragraph('まだ読んだ文章はありません。マップの人や本を調べよう。','muted');
   for (const note of notes) buttons([note.name,()=>read(note,true,true)]);
-  if (Object.keys(save.archive).length) buttons(['これまでの証拠',archivePanel]);
-  if (record.mistakes.length) buttons(['ヒントを見る',()=>{
-    const index = Math.min(Math.max(0,record.mistakes.length-2),game.question.hints.length-1);
-    record.hints += 1;
-    writeHistory();
-    open('hint','攻略のヒント');
-    paragraph(game.question.hints[index]);
-  }]);
+  if (!game.flags.has('planned') && game.question.plan.sources.every(id=>game.notes.has(id))) buttons(['行動を選ぶ',showPlan]);
+  if (battleGuide(game.question).length) buttons(['番人の戦い方',showBattleGuide]);
+  if (Object.keys(save.archive).length) buttons(['これまでの物語',archivePanel]);
+}
+
+function showBattleGuide() {
+  const guide=battleGuide(game.question);
+  open('battle-guide','番人の戦い方');
+  for (const boss of guide) {
+    body.append(el('h3',boss.name));
+    for (const step of boss.steps) paragraph(step);
+  }
+  buttons(['冒険に戻る',close,true]);
 }
 function prologue() {
   open('prologue','序章　鐘が途切れた夜');
@@ -564,8 +583,13 @@ function historyPanel() {
   open('history','保護者向け　学習履歴');
   const success = r=>r.firstSuccess;
   paragraph(`プレイ ${records.length} 回　・　初回成功率 ${rate(records,success)}　・　ヒント使用率 ${rate(records,r=>r.hints>0)}`);
-  const totals=records.reduce((out,r)=>[out[0]+r.attempts,out[1]+r.reasonsCorrect,out[2]+r.retry,out[3]+r.playMs,out[4]+r.mistakes.length,out[5]+r.defeats,out[6]+r.tacticalErrors],[0,0,0,0,0,0,0]);
-  paragraph(`根拠正答率 ${totals[0]?Math.round(totals[1]*100/totals[0])+'%':'—'}　再挑戦 ${totals[2]}回　操作 ${Math.round(totals[3]/1000)}秒　読解・探索の誤り ${totals[4]}回　戦術の誤り ${totals[6]}回　戦闘での敗北 ${totals[5]}回`);
+  const revised=records.filter(r=>Number.isInteger(r.answersCorrect));
+  const answers=revised.reduce((n,r)=>n+r.attempts,0);
+  const correct=revised.reduce((n,r)=>n+r.answersCorrect,0);
+  const retries=records.reduce((n,r)=>n+r.retry,0);
+  const seconds=Math.round(records.reduce((n,r)=>n+r.playMs,0)/1000);
+  const defeats=records.reduce((n,r)=>n+r.defeats,0);
+  paragraph(`行動の正答率 ${answers?Math.round(correct*100/answers)+'%':'—'}　再挑戦 ${retries}回　操作 ${seconds}秒　戦闘での敗北 ${defeats}回`);
   paragraph('初回成功は、読解に関する誤った行動をせずにクリアした記録です。割合には未クリアの挑戦も含みます。','muted');
   const dimensions = [
     ['問題の種類',[...new Set(records.map(r=>r.type))].sort(),(r,k)=>r.type===k],
@@ -616,7 +640,7 @@ function perform(action) {
 }
 const controls = input({playable,action:perform});
 for (const [selector,callback] of [
-  ['#prologue',prologue],['#journal',journal],['#field-notes',journal],['#pause',pause],['#field-menu',pause],
+  ['#choose-action',showPlan],['#prologue',prologue],['#journal',journal],['#field-notes',journal],['#pause',pause],['#field-menu',pause],
   ['#bag',bag],['#restart',()=>start(game.stage.id,true)],
   ['#clear-result',showClearResult],['#end-preview',endPreview],
   ['#start',()=>save.unlocked>1?stageMenu():start(1)],
@@ -649,16 +673,16 @@ try {
     if (!response.ok) throw new Error(name);
     return response.json();
   }));
-  const last=store.read('published-questions',null);
+  const last=store.read('published-simple-questions',null);
   if (last && !validateBank(last,stages).length) questions=last;
   if (navigator.onLine) {
     try {
-      const update=await fetch('./data/questions.json?refresh=1',{cache:'no-cache',signal:AbortSignal.timeout(2400)});
+      const update=await fetch('./data/questions.json?refresh=1&reading=2',{cache:'no-cache',signal:AbortSignal.timeout(2400)});
       if (update.ok) {
         const received=await update.json();
         if (!validateBank(received,stages).length) {
           questions=received;
-          if (JSON.stringify(last)!==JSON.stringify(received)) store.write('published-questions',received);
+          if (JSON.stringify(last)!==JSON.stringify(received)) store.write('published-simple-questions',received);
         }
       }
     } catch {

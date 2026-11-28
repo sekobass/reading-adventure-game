@@ -21,6 +21,7 @@
 <div class="layout">
 <section class="game" aria-label="ゲーム画面">
 <div class="gamebar"><span id="location">◆　七つの封印</span><span id="stats"></span><button id="field-notes" aria-label="ミッションと文章" hidden>▤</button><button id="field-menu" aria-label="メニュー" hidden>☰</button><button id="pause" aria-label="一時停止" hidden>Ⅱ</button></div>
+<div id="objective" class="objective" hidden><div><strong>次の目標</strong> <span id="objective-text" aria-live="polite"></span></div><button id="choose-action" hidden>行動を選ぶ</button></div>
 <div class="viewport">
 <canvas id="world" width="480" height="288" aria-label="冒険マップ"></canvas>
 <div id="title" class="title">
@@ -48,7 +49,7 @@
 <section class="card"><div class="card-heading"><span>◈</span><h2>周辺地図</h2></div><canvas id="minimap" width="160" height="96" aria-label="壁と現在地を示す地図"></canvas></section>
 </aside>
 </div>
-<footer><a href="../">Ver.0.2へ戻る</a><span>Ver. 1.0 開発版</span></footer>
+<footer><a href="../">Ver.0.2へ戻る</a><span>Ver. 1.0 読解改訂版</span></footer>
 </main>
 <dialog id="modal" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title" tabindex="-1"></h2><button id="close" aria-label="閉じる">×</button></div><div id="dialog-body"></div></dialog>
 </body>

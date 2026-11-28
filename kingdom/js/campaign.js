@@ -1,11 +1,10 @@
 export const chapters=['消えた村人','裏切り者のいる村','呪われた森林'];
 
 export function chooseVariant(bank,stageId,progress,repeat=false) {
-  const candidates=bank.filter(q=>q.stageId===stageId);
-  const gap=Math.min(...candidates.map(q=>Math.abs(q.difficulty-progress.settings.reading)));
-  const variants=candidates.filter(q=>Math.abs(q.difficulty-progress.settings.reading)===gap);
+  const level=progress.settings.reading;
+  const variants=bank.filter(q=>q.stageId===stageId && q.difficulty===level);
   if (!variants.length) return;
-  const key=String(stageId);
+  const key=stageId+':'+level;
   const previous=progress.variants[key];
   const bias=stageId>=5 && progress.route==='disclose'?1:0;
   const index=(Number.isInteger(previous)?previous+1:repeat?1:bias)%variants.length;
@@ -46,8 +45,20 @@ export function readBackup(value,maxStage) {
       ![18,20,22,24,26].includes(p.settings.text) ||
       h.some(r=>!r || typeof r.problem!=='string' || typeof r.type!=='string' || !validStage(r.stage) ||
         !Array.isArray(r.mistakes) || !r.mistakes.every(m=>typeof m==='string') ||
+        (r.answersCorrect!==undefined && (!nonnegative(r.answersCorrect) || r.answersCorrect>r.attempts)) ||
         !['readingMs','playMs','attempts','reasonsCorrect','evidenceCorrect','retry','defeats','hints','rereads','tacticalErrors'].every(key=>nonnegative(r[key])))) {
     throw new Error('Ver.1.0のバックアップ形式と内容を確認してください。');
   }
   return {progress:p,history:h};
+}
+
+export function battleGuide(question) {
+  const names={fire:'炎',ice:'氷',thunder:'雷'};
+  const enemies=[...question.enemies,...question.rules.flatMap(r=>[r.then.spawn].flat().filter(Boolean))];
+  return enemies.filter(e=>e.boss).map(enemy=>({
+    name:enemy.name ?? '番人',
+    steps:enemy.phases.map((phase,i)=>
+      '第'+(i+1)+'段階：'+(phase.summon?'小さな守り手を先に倒す。':'')+
+      (phase.guard?'攻撃を防御するか、回避する。':'')+names[phase.element]+'を当ててから剣で攻撃する。'),
+  }));
 }

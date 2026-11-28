@@ -24,7 +24,6 @@ export class Game {
     this.inventory = {};
     this.flags = new Set();
     this.planAttempts = 0;
-    this.fieldFaults = 0;
     this.projectiles = [];
     this.notes = new Set();
     this.sequence = 0;
@@ -458,37 +457,30 @@ export class Game {
     this.operate(o);
   }
 
-  propose(index,reasonIndex,evidence=[]) {
-    const plan=this.question.plan;
-    if (!plan || this.flags.has('planned') || this.planAttempts>=2 ||
-        !plan.sources.every(id=>this.notes.has(id))) return;
+  propose(index) {
+    const {plan}=this.question;
+    if (!plan || this.flags.has('planned') || !plan.sources.every(id=>this.notes.has(id))) return;
     const option=plan.options[index];
     if (!option) return;
-    const reason=plan.reasons?.[reasonIndex];
-    if (plan.reasons && !reason) return;
-    const evidenceCorrect=plan.evidence.length===new Set(evidence).size && plan.evidence.every(id=>evidence.includes(id));
-    this.ui.reason?.(Boolean(reason?.correct),evidenceCorrect);
-    if (option.correct && reason?.correct && evidenceCorrect) {
+    this.ui.answer?.(Boolean(option.correct));
+    if (option.correct) {
       this.flags.add('planned');
       this.ui.sound('pickup');
-      return;
+    } else {
+      this.planAttempts++;
+      this.ui.wrong('行き先・行動: '+option.text);
     }
-    this.planAttempts+=1;
-    if (this.planAttempts===1) this.enemies.push(this.makeEnemy({id:'patrol',role:'support',x:306,y:241}));
-    this.ui.wrong('攻略計画: '+option.text+(reason?' 根拠: '+reason.text:''));
   }
 
   operate(o) {
     const plan=this.question.plan;
     if (plan?.target===o.id) return this.ui.plan?.();
-    if (this.fieldFaults>=2) return this.ui.toast('現地の判断をやり直そう。作戦卓へ戻って再調査できる。');
     if (plan && !this.flags.has('planned')) return this.ui.toast('記録を読み、計画を立ててから進もう。');
     const seq = this.question.sequence;
     if (seq?.targets.includes(o.id)) {
       if (this.flags.has(seq.onComplete)) return this.ui.toast('仕掛けはすでに動いている。');
       if (seq.order[this.sequence] !== o.id) {
         this.sequence = 0;
-        this.fieldFaults++;
         this.ui.wrong(seq.wrong);
         return;
       }
@@ -504,7 +496,7 @@ export class Game {
     const rule = this.question.rules.find(r => r.target === o.id);
     if (!rule) return;
     if (!this.matches(rule.when)) {
-      if (rule.wrong) { this.fieldFaults++; this.ui.wrong(rule.wrong); }
+      if (rule.wrong) this.ui.wrong(rule.wrong);
       return;
     }
     const result = rule.then;
@@ -535,7 +527,7 @@ export class Game {
       }
     }
     if (o.delivery) this.ui.toast('依頼の品を届けた！');
-    if (!rule.when.length && rule.wrong) { this.fieldFaults++; this.ui.wrong(rule.wrong); }
+    if (!rule.when.length && rule.wrong) this.ui.wrong(rule.wrong);
     if (result.win || (this.question.completeWhen && this.matches(this.question.completeWhen))) this.win();
   }
 

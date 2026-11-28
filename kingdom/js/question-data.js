@@ -21,7 +21,7 @@ function conditions(value) {
 }
 
 function validChoices(options) {
-  return Array.isArray(options) && [4,5].includes(options.length) &&
+  return Array.isArray(options) && [3,4].includes(options.length) &&
     options.every(o=>text(o?.text) && (o.correct===undefined || typeof o.correct==='boolean')) &&
     options.filter(o=>o.correct===true).length===1 &&
     new Set(options.map(o=>o.text)).size===options.length;
@@ -38,12 +38,17 @@ function commonObjects(q, stage, errors) {
   if (objects.size!==q.objects.length) errors.push('配置物のIDが重複しています。');
   if (new Set(q.objects.map(o=>o.x+','+o.y)).size!==q.objects.length) errors.push('同じ座標に複数の配置物があります。');
   const plan=q.plan;
+  const sourceCount=q.difficulty<=3?1:2;
   if (!plan || !objects.has(plan.target) || objects.get(plan.target).text ||
-      !strings(plan.sources) || !plan.sources.length || !plan.sources.every(id=>text(objects.get(id)?.text)) ||
-      !validChoices(plan.options) || !validChoices(plan.reasons) || !strings(plan.evidence) ||
-      plan.sources.length<3 || plan.sources.length>6 || new Set(plan.sources).size!==plan.sources.length ||
-      plan.evidence.length<2 || new Set(plan.evidence).size!==plan.evidence.length || !plan.evidence.every(id=>plan.sources.includes(id))) {
-    errors.push('攻略計画と根拠には、異なる4～5つの選択肢と正解1つが必要です。参照する文章も確認してください。');
+      !text(plan.prompt) || !strings(plan.sources) || plan.sources.length!==sourceCount ||
+      new Set(plan.sources).size!==plan.sources.length ||
+      q.objects.filter(o=>text(o.text)).length>2 ||
+      !plan.sources.every(id=>text(objects.get(id)?.text) && [...objects.get(id).text].length<=100) ||
+      !validChoices(plan.options) ||
+      plan.options.find(o=>o.correct)?.text!==objects.get(plan.destination)?.name ||
+      !Array.isArray(plan.highlights) || plan.highlights.length!==sourceCount ||
+      !plan.sources.every(id=>plan.highlights.some(h=>h?.source===id && text(h.quote) && objects.get(id).text.includes(h.quote)))) {
+    errors.push('難易度に合った文章（Lv.1～3は1つ、Lv.4～5は2つ、各100文字以下）、質問、3～4択、目的地と強調する文を確認してください。');
   }
   const steps=q.sequence;
   if (steps && (!strings(steps.targets) || !strings(steps.order) || !steps.order.length ||
@@ -64,6 +69,10 @@ function commonObjects(q, stage, errors) {
   if (!Array.isArray(q.rules) || new Set(q.rules.map(r=>r?.target)).size!==q.rules.length) {
     errors.push('攻略条件を配列で指定し、対象を1回ずつ登録してください。');
     return;
+  }
+  if (!q.rules.some(rule=>rule?.target===plan?.destination &&
+      (rule.then?.win || rule.then?.set?.length || rule.then?.give || rule.then?.move))) {
+    errors.push('目的地を調べた後にミッションが進むルールを登録してください。');
   }
   for (const rule of q.rules) {
     const target=objects.get(rule?.target);
@@ -166,9 +175,9 @@ export function validateQuestion(question,stages) {
   const errors=[];
   const stage=stages.find(s=>s.id===q?.stageId);
   if (!q || typeof q.id!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/.test(q.id ?? '') || !text(q.type) ||
-      !text(q.mission) || !text(q.explanation) || !strings(q.hints) || q.hints.length<2 ||
+      !text(q.mission) || !text(q.explanation) || !strings(q.hints) || q.hints.length<1 ||
       !stage || ![1,2,3,4,5].includes(q.difficulty)) {
-    errors.push('問題ID、ステージ、難易度、分類、目標、ヒント2つ以上、解説を確認してください。');
+    errors.push('問題ID、ステージ、難易度、分類、目標、ヒント、解説を確認してください。');
   }
   if (stage) commonObjects(q,stage,errors);
   if (!errors.length && !canFinish(stage,q)) {
@@ -182,8 +191,10 @@ export function validateBank(value, stages, validate = validateQuestion) {
   const errors=[];
   if (new Set(value.map(q=>q?.id)).size!==value.length) errors.push('問題IDが重複しています。');
   for (const q of value) for (const error of validate(q,stages)) errors.push((q?.id ?? 'IDなし')+'：'+error);
-  for (const stage of stages) {
-    if (!value.some(q=>q?.stageId===stage.id)) errors.push('ミッション '+stage.id+' には少なくとも1問が必要です。');
+  for (const stage of stages) for (const level of [1,2,3,4,5]) {
+    if (value.filter(q=>q?.stageId===stage.id && q.difficulty===level).length<2) {
+      errors.push('ミッション '+stage.id+' のLv.'+level+' には2問以上が必要です。');
+    }
   }
   return errors;
 }

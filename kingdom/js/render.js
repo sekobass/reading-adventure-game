@@ -272,6 +272,15 @@ export function renderer(canvas,minimap) {
         chart.fillStyle=note.id==='plan'?'#edbd89':game.notes.has(note.id)?'#699f90':'#b5a8c8';
         chart.fillRect(note.x-4,note.y-4,8,8);
       }
+      if (game.flags.has('planned') && !game.finished && !game.arenaActive) {
+        const id=game.flags.has('aligned')?'gate':game.question.plan.destination;
+        const destination=game.objects.find(o=>o.id===id);
+        if (destination) {
+          chart.strokeStyle='#ffe0a7';
+          chart.lineWidth=3;
+          chart.strokeRect(destination.x-8,destination.y-8,16,16);
+        }
+      }
       chart.fillStyle='#d6fce6';
       chart.fillRect(game.player.x-5,game.player.y-5,10,10);
     }
