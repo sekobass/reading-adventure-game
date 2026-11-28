@@ -179,6 +179,11 @@ function launchGame(stage,problem) {
   if (plan.reasons) plan.reasons=shuffled(plan.reasons);
   game = new Game(stage,{...problem,plan},save,{
     toast, sound, wrong, read, defeat, complete, plan:showPlan, persist:writeSave,
+    tactics() {
+      record.tacticalErrors++;
+      toast('攻撃が通らない。広間の記録を確かめよう。');
+      writeHistory();
+    },
     reason(correct,evidence) {
       record.attempts++;
       record.reasonsCorrect+=Number(correct);
@@ -559,8 +564,8 @@ function historyPanel() {
   open('history','保護者向け　学習履歴');
   const success = r=>r.firstSuccess;
   paragraph(`プレイ ${records.length} 回　・　初回成功率 ${rate(records,success)}　・　ヒント使用率 ${rate(records,r=>r.hints>0)}`);
-  const totals=records.reduce((out,r)=>[out[0]+r.attempts,out[1]+r.reasonsCorrect,out[2]+r.retry,out[3]+r.playMs,out[4]+r.mistakes.length,out[5]+r.defeats],[0,0,0,0,0,0]);
-  paragraph(`根拠正答率 ${totals[0]?Math.round(totals[1]*100/totals[0])+'%':'—'}　再挑戦 ${totals[2]}回　操作 ${Math.round(totals[3]/1000)}秒　判断の誤り ${totals[4]}回　戦闘での敗北 ${totals[5]}回`);
+  const totals=records.reduce((out,r)=>[out[0]+r.attempts,out[1]+r.reasonsCorrect,out[2]+r.retry,out[3]+r.playMs,out[4]+r.mistakes.length,out[5]+r.defeats,out[6]+r.tacticalErrors],[0,0,0,0,0,0,0]);
+  paragraph(`根拠正答率 ${totals[0]?Math.round(totals[1]*100/totals[0])+'%':'—'}　再挑戦 ${totals[2]}回　操作 ${Math.round(totals[3]/1000)}秒　読解・探索の誤り ${totals[4]}回　戦術の誤り ${totals[6]}回　戦闘での敗北 ${totals[5]}回`);
   paragraph('初回成功は、読解に関する誤った行動をせずにクリアした記録です。割合には未クリアの挑戦も含みます。','muted');
   const dimensions = [
     ['問題の種類',[...new Set(records.map(r=>r.type))].sort(),(r,k)=>r.type===k],

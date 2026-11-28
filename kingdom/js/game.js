@@ -361,7 +361,7 @@ export class Game {
   rejectAttack(e,message) {
     if (e.disruptedAt===undefined || this.clock-e.disruptedAt>.8) {
       e.disruptedAt=this.clock;
-      this.ui.wrong(message);
+      this.ui.tactics?.(message);
     }
     if (!e.windup && !e.exposed) e.rest=Math.min(e.rest,.15);
     this.effect(e.x,e.y,'burst','#95aab7');

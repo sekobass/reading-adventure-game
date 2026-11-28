@@ -46,7 +46,7 @@ export function readBackup(value,maxStage) {
       ![18,20,22,24,26].includes(p.settings.text) ||
       h.some(r=>!r || typeof r.problem!=='string' || typeof r.type!=='string' || !validStage(r.stage) ||
         !Array.isArray(r.mistakes) || !r.mistakes.every(m=>typeof m==='string') ||
-        !['readingMs','playMs','attempts','reasonsCorrect','evidenceCorrect','retry','defeats','hints','rereads'].every(key=>nonnegative(r[key])))) {
+        !['readingMs','playMs','attempts','reasonsCorrect','evidenceCorrect','retry','defeats','hints','rereads','tacticalErrors'].every(key=>nonnegative(r[key])))) {
     throw new Error('Ver.1.0のバックアップ形式と内容を確認してください。');
   }
   return {progress:p,history:h};
